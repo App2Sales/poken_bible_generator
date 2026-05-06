@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     X_VECTOR_ONLY_MODE=false
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg libsndfile1 \
+    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg libsndfile1 sox \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
