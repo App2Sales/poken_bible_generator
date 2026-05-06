@@ -1,0 +1,10 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2
+numpy>=1.26
+soundfile>=0.12
+torch>=2.2
+transformers>=4.40
+accelerate>=0.27
+safetensors>=0.4
+runpod>=1.6
