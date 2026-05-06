@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     BIBLE_DB_PATH=/data/bible.sqlite \
     OUTPUT_DIR=/outputs \
+    ASSET_CACHE_DIR=/data/assets \
     MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
     TTS_MODE=voice_clone \
     REF_AUDIO_PATH=/data/voices/narrador.wav \
@@ -27,7 +28,7 @@ COPY runpod_handler.py /app/runpod_handler.py
 COPY scripts /app/scripts
 COPY bibles/naa.db /data/bible.sqlite
 
-RUN mkdir -p /data/voices /outputs
+RUN mkdir -p /data/voices /data/assets /outputs
 
 EXPOSE 8000
 

@@ -6,9 +6,6 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import soundfile as sf
-
 
 def write_audio_file(chunks: list[tuple[Any, int]], output_path: Path, bitrate: str) -> float:
     if not chunks:
@@ -23,6 +20,8 @@ def write_audio_file(chunks: list[tuple[Any, int]], output_path: Path, bitrate: 
         wav_paths: list[Path] = []
 
         for index, (wav, sample_rate) in enumerate(chunks):
+            import soundfile as sf
+
             audio = _to_numpy_audio(wav)
             duration_seconds += len(audio) / float(sample_rate)
             wav_path = temp_path / f"chunk_{index:04d}.wav"
@@ -78,6 +77,8 @@ def probe_duration_seconds(path: Path, fallback: float) -> float:
 
 
 def _to_numpy_audio(wav: Any) -> np.ndarray:
+    import numpy as np
+
     if hasattr(wav, "detach"):
         wav = wav.detach().cpu().float().numpy()
     elif hasattr(wav, "cpu"):

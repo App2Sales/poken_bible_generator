@@ -2,28 +2,25 @@ from __future__ import annotations
 
 import importlib
 import logging
-import os
 from pathlib import Path
 from typing import Any
-
-from app.utils import file_sha256, text_sha256
 
 logger = logging.getLogger(__name__)
 
 
 class TTSEngine:
-    def __init__(self, model_id: str, mode: str):
+    def __init__(self, model_id: str, mode: str, *, voice_id: str, x_vector_only_mode: bool):
         self.model_id = model_id
         self.mode = mode
         self.model = None
         self.voice_clone_prompt = None
         self.ref_audio_path: str | None = None
         self.ref_text_path: str | None = None
-        self.ref_text: str | None = None
         self.ref_audio_sha256: str | None = None
         self.ref_text_sha256: str | None = None
-        self.voice_id = os.getenv("VOICE_ID", "narrador_principal")
-        self.x_vector_only_mode = _env_bool("X_VECTOR_ONLY_MODE", False)
+        self.voice_id = voice_id
+        self.x_vector_only_mode = x_vector_only_mode
+        self._prompt_cache: dict[tuple[str, str, str | None, bool], Any] = {}
 
     def load_model(self) -> None:
         if self.model is not None:
@@ -33,8 +30,6 @@ class TTSEngine:
             raise ValueError(
                 f"TTS_MODE={self.mode!r} não é suportado neste MVP. Use TTS_MODE=voice_clone."
             )
-
-        self._load_voice_reference()
 
         import torch
 
@@ -57,27 +52,58 @@ class TTSEngine:
                 dtype=torch.bfloat16,
             )
 
-        self.voice_clone_prompt = self.model.create_voice_clone_prompt(
-            ref_audio=self.ref_audio_path,
-            ref_text=self.ref_text,
-            x_vector_only_mode=self.x_vector_only_mode,
-        )
-        logger.info(
-            "Voice clone prompt criado uma vez no startup: voice_id=%s ref_audio_sha256=%s ref_text_sha256=%s",
-            self.voice_id,
-            self.ref_audio_sha256,
-            self.ref_text_sha256,
-        )
+        logger.info("Modelo TTS carregado uma vez no startup: model_id=%s mode=%s", self.model_id, self.mode)
 
-    def synthesize(self, text: str, language: str = "Portuguese"):
-        if self.model is None or self.voice_clone_prompt is None:
+    def get_voice_clone_prompt(
+        self,
+        *,
+        voice_id: str,
+        ref_audio_path: str,
+        ref_text_path: str | None,
+        ref_text: str,
+        ref_audio_sha256: str,
+        ref_text_sha256: str | None,
+        x_vector_only_mode: bool,
+    ):
+        if self.model is None:
             raise RuntimeError("TTSEngine não foi carregado. Chame load_model() no startup.")
+
+        cache_key = (voice_id, ref_audio_sha256, ref_text_sha256, x_vector_only_mode)
+        if cache_key not in self._prompt_cache:
+            self._prompt_cache[cache_key] = self.model.create_voice_clone_prompt(
+                ref_audio=ref_audio_path,
+                ref_text=ref_text,
+                x_vector_only_mode=x_vector_only_mode,
+            )
+            logger.info(
+                "Voice clone prompt criado e cacheado: voice_id=%s ref_audio_sha256=%s ref_text_sha256=%s",
+                voice_id,
+                ref_audio_sha256,
+                ref_text_sha256,
+            )
+
+        self.voice_clone_prompt = self._prompt_cache[cache_key]
+        self.voice_id = voice_id
+        self.ref_audio_path = ref_audio_path
+        self.ref_text_path = ref_text_path
+        self.ref_audio_sha256 = ref_audio_sha256
+        self.ref_text_sha256 = ref_text_sha256
+        self.x_vector_only_mode = x_vector_only_mode
+        return self._prompt_cache[cache_key]
+
+    def synthesize(self, text: str, language: str = "Portuguese", *, voice_clone_prompt=None):
+        if self.model is None:
+            raise RuntimeError("TTSEngine não foi carregado. Chame load_model() no startup.")
+
+        prompt = voice_clone_prompt or self.voice_clone_prompt
+        if prompt is None:
+            raise RuntimeError("voice_clone_prompt não foi criado para esta voz.")
 
         if self.mode == "voice_clone":
             wavs, sr = self.model.generate_voice_clone(
                 text=text,
                 language=language,
-                voice_clone_prompt=self.voice_clone_prompt,
+                voice_clone_prompt=prompt,
             )
             return wavs[0], sr
 
@@ -91,51 +117,8 @@ class TTSEngine:
             "ref_audio_sha256": self.ref_audio_sha256,
             "ref_text_sha256": self.ref_text_sha256,
             "x_vector_only_mode": self.x_vector_only_mode,
+            "cached_voice_prompts": len(self._prompt_cache),
         }
-
-    def _load_voice_reference(self) -> None:
-        self.ref_audio_path = os.getenv("REF_AUDIO_PATH", "/data/voices/narrador.wav")
-        self.ref_text_path = os.getenv("REF_TEXT_PATH", "/data/voices/narrador.txt")
-        self.x_vector_only_mode = _env_bool("X_VECTOR_ONLY_MODE", False)
-
-        audio_path = Path(self.ref_audio_path)
-        if not audio_path.exists():
-            raise FileNotFoundError(f"REF_AUDIO_PATH não existe: {self.ref_audio_path}")
-
-        text_path = Path(self.ref_text_path)
-        if not text_path.exists():
-            if self.x_vector_only_mode:
-                logger.warning(
-                    "REF_TEXT_PATH não existe e X_VECTOR_ONLY_MODE=true; modo permitido apenas para teste e com qualidade potencialmente menor."
-                )
-                self.ref_text = ""
-                self.ref_text_sha256 = None
-            else:
-                raise FileNotFoundError(
-                    "REF_TEXT_PATH não existe: "
-                    f"{self.ref_text_path}. REF_TEXT é obrigatório quando TTS_MODE=voice_clone e X_VECTOR_ONLY_MODE=false."
-                )
-        else:
-            self.ref_text = text_path.read_text(encoding="utf-8").strip()
-            if not self.ref_text and not self.x_vector_only_mode:
-                raise ValueError(
-                    "REF_TEXT_PATH está vazio. REF_TEXT é obrigatório quando TTS_MODE=voice_clone e X_VECTOR_ONLY_MODE=false."
-                )
-            self.ref_text_sha256 = text_sha256(self.ref_text)
-
-        if self.x_vector_only_mode:
-            logger.warning(
-                "X_VECTOR_ONLY_MODE=true está ativo. Use apenas para teste; em produção use X_VECTOR_ONLY_MODE=false."
-            )
-
-        self.ref_audio_sha256 = file_sha256(audio_path)
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _import_qwen3_tts_model():

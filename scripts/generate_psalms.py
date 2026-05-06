@@ -25,9 +25,22 @@ def main() -> int:
     parser.add_argument("--end", type=int, default=150)
     parser.add_argument("--voice-id", default="narrador_principal")
     parser.add_argument("--language", default="Portuguese")
+    parser.add_argument("--bible-db-url")
+    parser.add_argument("--ref-audio-url")
+    parser.add_argument("--ref-text-url")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--no-upload", action="store_true")
     args = parser.parse_args()
+
+    assets = {
+        key: value
+        for key, value in {
+            "bible_db_url": args.bible_db_url,
+            "ref_audio_url": args.ref_audio_url,
+            "ref_text_url": args.ref_text_url,
+        }.items()
+        if value
+    }
 
     for chapter in range(args.start, args.end + 1):
         payload = {
@@ -43,6 +56,8 @@ def main() -> int:
             "force": args.force,
             "upload": not args.no_upload,
         }
+        if assets:
+            payload["assets"] = assets
         try:
             result = post_json(args.api_url, payload)
         except urllib.error.HTTPError as exc:

@@ -7,12 +7,19 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from app.assets import AssetRequest
 from app.config import settings
 from app.service import GenerationService
 
 logging.basicConfig(level=logging.INFO)
 
 service = GenerationService(settings)
+
+
+class AssetsRequest(BaseModel):
+    bible_db_url: str | None = None
+    ref_audio_url: str | None = None
+    ref_text_url: str | None = None
 
 
 class GenerateRequest(BaseModel):
@@ -27,6 +34,7 @@ class GenerateRequest(BaseModel):
     include_chapter_intro: bool = True
     force: bool = False
     upload: bool = True
+    assets: AssetsRequest | None = None
     narration_style: str | None = None
 
     class Config:
@@ -71,9 +79,20 @@ def generate(request: GenerateRequest) -> dict[str, Any]:
             include_chapter_intro=request.include_chapter_intro,
             force=request.force,
             upload=request.upload,
+            assets=to_asset_request(request.assets),
             narration_style=request.narration_style,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def to_asset_request(assets: AssetsRequest | None) -> AssetRequest | None:
+    if assets is None:
+        return None
+    return AssetRequest(
+        bible_db_url=assets.bible_db_url,
+        ref_audio_url=assets.ref_audio_url,
+        ref_text_url=assets.ref_text_url,
+    )

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.audio import probe_duration_seconds, write_audio_file
+from app.assets import AssetManager, AssetRequest, ResolvedAssets
 from app.bible import BibleRepository
 from app.config import Settings
 from app.tts_engine import TTSEngine
@@ -17,15 +18,41 @@ logger = logging.getLogger(__name__)
 class GenerationService:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.bible = BibleRepository(settings.bible_db_path)
-        self.tts = TTSEngine(settings.model_id, settings.tts_mode)
+        self.assets = AssetManager(settings)
+        self.tts = TTSEngine(
+            settings.model_id,
+            settings.tts_mode,
+            voice_id=settings.voice_id,
+            x_vector_only_mode=settings.x_vector_only_mode,
+        )
 
     def startup(self) -> None:
-        self.bible.validate()
+        if self.settings.x_vector_only_mode:
+            logger.warning(
+                "X_VECTOR_ONLY_MODE=true está ativo. Use apenas para teste; em produção use X_VECTOR_ONLY_MODE=false."
+            )
         self.tts.load_model()
 
     def voice_info(self) -> dict[str, Any]:
-        return self.tts.voice_info()
+        info = self.tts.voice_info()
+        if info.get("ref_audio_path_exists") or info.get("ref_text_path_exists"):
+            return info
+
+        ref_audio_path = Path(self.settings.ref_audio_path)
+        ref_text_path = Path(self.settings.ref_text_path)
+        ref_text_sha256 = None
+        if ref_text_path.exists():
+            ref_text_sha256 = file_sha256(ref_text_path)
+
+        return {
+            **info,
+            "voice_id": self.settings.voice_id,
+            "ref_audio_path_exists": ref_audio_path.exists(),
+            "ref_text_path_exists": ref_text_path.exists(),
+            "ref_audio_sha256": file_sha256(ref_audio_path) if ref_audio_path.exists() else None,
+            "ref_text_sha256": ref_text_sha256,
+            "x_vector_only_mode": self.settings.x_vector_only_mode,
+        }
 
     def generate_chapter(
         self,
@@ -41,17 +68,13 @@ class GenerationService:
         include_chapter_intro: bool,
         force: bool,
         upload: bool,
+        assets: AssetRequest | None = None,
         narration_style: str | None = None,
     ) -> dict[str, Any]:
         if audio_format != "mp3":
             raise ValueError("Apenas format=mp3 é suportado no MVP")
 
-        configured_voice_id = self.tts.voice_id
-        requested_voice_id = voice_id or configured_voice_id
-        if requested_voice_id != configured_voice_id:
-            raise ValueError(
-                f"voice_id inválido para este worker: {requested_voice_id}. Voice clone carregado: {configured_voice_id}."
-            )
+        requested_voice_id = voice_id or self.settings.voice_id
 
         if narration_style:
             logger.info(
@@ -60,7 +83,15 @@ class GenerationService:
             )
 
         selected_language = language or self.settings.default_language
-        content = self.bible.get_chapter(
+        resolved_assets = self.assets.resolve(
+            assets,
+            x_vector_only_mode=self.settings.x_vector_only_mode,
+            force_download=force,
+        )
+        bible = BibleRepository(resolved_assets.bible_db_path)
+        bible.validate()
+
+        content = bible.get_chapter(
             book,
             chapter,
             include_headings=include_headings,
@@ -78,6 +109,7 @@ class GenerationService:
             chapter=chapter,
             full_text=content.text,
             voice_id=requested_voice_id,
+            resolved_assets=resolved_assets,
             language=selected_language,
             include_headings=include_headings,
             include_verse_numbers=include_verse_numbers,
@@ -94,11 +126,25 @@ class GenerationService:
                 metadata["metadata_path"] = str(metadata_path)
                 return metadata
 
+        voice_clone_prompt = self.tts.get_voice_clone_prompt(
+            voice_id=requested_voice_id,
+            ref_audio_path=resolved_assets.ref_audio_path,
+            ref_text_path=resolved_assets.ref_text_path,
+            ref_text=resolved_assets.ref_text,
+            ref_audio_sha256=resolved_assets.ref_audio_sha256,
+            ref_text_sha256=resolved_assets.ref_text_sha256,
+            x_vector_only_mode=self.settings.x_vector_only_mode,
+        )
+
         text_chunks = chunk_units(content.units, max_chars=self.settings.chunk_max_chars)
         audio_chunks = []
         chunk_metadata: list[dict[str, Any]] = []
         for index, chunk_text in enumerate(text_chunks, start=1):
-            wav, sample_rate = self.tts.synthesize(chunk_text, language=selected_language)
+            wav, sample_rate = self.tts.synthesize(
+                chunk_text,
+                language=selected_language,
+                voice_clone_prompt=voice_clone_prompt,
+            )
             audio_chunks.append((wav, sample_rate))
             chunk_metadata.append(
                 {
@@ -119,8 +165,14 @@ class GenerationService:
             "voice_id": requested_voice_id,
             "model_id": self.settings.model_id,
             "tts_mode": self.settings.tts_mode,
-            "ref_audio_sha256": self.tts.ref_audio_sha256,
-            "ref_text_sha256": self.tts.ref_text_sha256,
+            "bible_db_sha256": resolved_assets.bible_db_sha256,
+            "ref_audio_sha256": resolved_assets.ref_audio_sha256,
+            "ref_text_sha256": resolved_assets.ref_text_sha256,
+            "asset_urls": {
+                "bible_db_url": resolved_assets.bible_db_url,
+                "ref_audio_url": resolved_assets.ref_audio_url,
+                "ref_text_url": resolved_assets.ref_text_url,
+            },
             "language": selected_language,
             "include_headings": include_headings,
             "include_verse_numbers": include_verse_numbers,
@@ -148,6 +200,7 @@ class GenerationService:
         chapter: int,
         full_text: str,
         voice_id: str,
+        resolved_assets: ResolvedAssets,
         language: str,
         include_headings: bool,
         include_verse_numbers: bool,
@@ -162,8 +215,9 @@ class GenerationService:
                 "model_id": self.settings.model_id,
                 "tts_mode": self.settings.tts_mode,
                 "voice_id": voice_id,
-                "ref_audio_sha256": self.tts.ref_audio_sha256,
-                "ref_text_sha256": self.tts.ref_text_sha256,
+                "bible_db_sha256": resolved_assets.bible_db_sha256,
+                "ref_audio_sha256": resolved_assets.ref_audio_sha256,
+                "ref_text_sha256": resolved_assets.ref_text_sha256,
                 "language": language,
                 "include_headings": include_headings,
                 "include_verse_numbers": include_verse_numbers,

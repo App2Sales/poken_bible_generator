@@ -243,3 +243,9 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Spoken Bible local artifacts
+/outputs/
+/data/assets/
+*.mp3
+*.wav

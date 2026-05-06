@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.assets import AssetRequest
 from app.config import settings
 from app.service import GenerationService
 
@@ -34,7 +35,20 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
         include_chapter_intro=parse_bool(payload.get("include_chapter_intro", True)),
         force=parse_bool(payload.get("force", False)),
         upload=parse_bool(payload.get("upload", True)),
+        assets=asset_request(payload.get("assets")),
         narration_style=payload.get("narration_style"),
+    )
+
+
+def asset_request(value: Any) -> AssetRequest | None:
+    if not value:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("assets deve ser um objeto com bible_db_url, ref_audio_url e/ou ref_text_url")
+    return AssetRequest(
+        bible_db_url=value.get("bible_db_url"),
+        ref_audio_url=value.get("ref_audio_url"),
+        ref_text_url=value.get("ref_text_url"),
     )
 
 

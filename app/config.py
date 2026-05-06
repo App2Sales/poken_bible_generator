@@ -31,6 +31,7 @@ def default_bible_db_path() -> str:
 class Settings:
     bible_db_path: str = default_bible_db_path()
     output_dir: str = os.getenv("OUTPUT_DIR", "/outputs")
+    asset_cache_dir: str = os.getenv("ASSET_CACHE_DIR", "/data/assets")
     model_id: str = os.getenv("MODEL_ID", DEFAULT_MODEL_ID)
     tts_mode: str = os.getenv("TTS_MODE", "voice_clone")
     ref_audio_path: str = os.getenv("REF_AUDIO_PATH", "/data/voices/narrador.wav")
