@@ -162,6 +162,70 @@ O metadata JSON é salvo em `/outputs/default/<livro>/metadata/<livro>_<capitulo
 
 ## RunPod
 
+### Pod Manual
+
+Para desenvolvimento e depuração, comece com um RunPod Pod normal usando uma imagem PyTorch/CUDA. Esse fluxo é mais fácil para validar dependências, modelo, assets por URL e geração de capítulos antes de migrar para Serverless.
+
+Instale dependências do sistema dentro do Pod:
+
+```bash
+apt-get update
+apt-get install -y git ffmpeg sox libsndfile1 sqlite3
+```
+
+Essas dependências são necessárias porque:
+
+- `git`: clonar e atualizar o repositório.
+- `ffmpeg`: concatenar chunks e codificar o MP3 final.
+- `sox`: usado pela stack de áudio do `qwen-tts`.
+- `libsndfile1`: necessário para leitura/escrita de áudio via `soundfile`.
+- `sqlite3`: útil para inspecionar e validar o banco bíblico no Pod.
+
+Clone e instale dependências Python:
+
+```bash
+cd /workspace
+git clone https://github.com/App2Sales/poken_bible_generator.git
+cd poken_bible_generator
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Configure variáveis de ambiente para o Pod:
+
+```bash
+export OUTPUT_DIR=/workspace/outputs
+export ASSET_CACHE_DIR=/workspace/assets
+export MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Base
+export TTS_MODE=voice_clone
+export VOICE_ID=narrador_principal
+export DEFAULT_LANGUAGE=Portuguese
+export X_VECTOR_ONLY_MODE=false
+export CHUNK_MAX_CHARS=400
+```
+
+Inicie a API:
+
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Para manter rodando em background no Pod:
+
+```bash
+nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > /workspace/uvicorn.log 2>&1 &
+```
+
+Teste:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+Se usar o proxy público do RunPod, chamadas longas para `/generate` podem retornar `524` por timeout do Cloudflare mesmo que o worker continue processando. Para capítulos longos, gere dentro do Pod via `curl http://127.0.0.1:8000/generate` ou use um fluxo assíncrono/serverless depois.
+
+### Serverless
+
 Formato de chamada:
 
 ```json
