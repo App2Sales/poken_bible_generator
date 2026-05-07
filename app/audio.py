@@ -76,6 +76,12 @@ def probe_duration_seconds(path: Path, fallback: float) -> float:
         return fallback
 
 
+def silence(seconds: float, sample_rate: int):
+    import numpy as np
+
+    return np.zeros(int(seconds * sample_rate), dtype=np.float32)
+
+
 def _to_numpy_audio(wav: Any) -> np.ndarray:
     import numpy as np
 

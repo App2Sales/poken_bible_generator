@@ -20,6 +20,7 @@ VOICE_ID=narrador_principal
 DEFAULT_LANGUAGE=Portuguese
 X_VECTOR_ONLY_MODE=false
 CHUNK_MAX_CHARS=400
+CHAPTER_INTRO_PAUSE_SECONDS=1.0
 ```
 
 No startup, a aplicação carrega o modelo uma vez. O `voice_clone_prompt` é criado uma vez por conjunto de assets, identificado por `voice_id`, SHA-256 do áudio de referência, SHA-256 da transcrição e `X_VECTOR_ONLY_MODE`.
@@ -67,6 +68,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   "include_headings": false,
   "include_verse_numbers": false,
   "include_chapter_intro": true,
+  "chapter_intro_pause_seconds": 1.0,
   "force": false,
   "upload": true,
   "assets": {
@@ -160,6 +162,27 @@ O `input_hash` considera `book_id`, `chapter`, texto completo do capítulo, `mod
 
 O metadata JSON é salvo em `/outputs/default/<livro>/metadata/<livro>_<capitulo>.json` e inclui `bible_db_sha256`, `ref_audio_sha256`, `ref_text_sha256`, URLs dos assets, chunks, duração, SHA-256 do áudio e `input_hash`.
 
+## Pausa Após Título
+
+Quando `include_chapter_intro=true`, a aplicação narra o título do capítulo, por exemplo `Salmos, capítulo 2.`, insere uma pausa e depois começa o texto bíblico.
+
+O valor padrão é configurado por:
+
+```env
+CHAPTER_INTRO_PAUSE_SECONDS=1.0
+```
+
+Você também pode sobrescrever por chamada:
+
+```json
+{
+  "include_chapter_intro": true,
+  "chapter_intro_pause_seconds": 1.25
+}
+```
+
+Use `0` para não inserir pausa artificial. Valores negativos ou acima de `10` segundos são rejeitados.
+
 ## RunPod
 
 ### Pod Manual
@@ -202,6 +225,7 @@ export VOICE_ID=narrador_principal
 export DEFAULT_LANGUAGE=Portuguese
 export X_VECTOR_ONLY_MODE=false
 export CHUNK_MAX_CHARS=400
+export CHAPTER_INTRO_PAUSE_SECONDS=1.0
 ```
 
 Inicie a API:
@@ -238,6 +262,7 @@ Formato de chamada:
     "include_headings": false,
     "include_verse_numbers": false,
     "include_chapter_intro": true,
+    "chapter_intro_pause_seconds": 1.0,
     "force": false,
     "upload": true,
     "assets": {

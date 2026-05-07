@@ -12,7 +12,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VOICE_ID=narrador_principal \
     DEFAULT_LANGUAGE=Portuguese \
     X_VECTOR_ONLY_MODE=false \
-    CHUNK_MAX_CHARS=400
+    CHUNK_MAX_CHARS=400 \
+    CHAPTER_INTRO_PAUSE_SECONDS=1.0
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg libsndfile1 sox \

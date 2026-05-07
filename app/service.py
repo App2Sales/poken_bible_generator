@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from app.audio import probe_duration_seconds, write_audio_file
+from app.audio import probe_duration_seconds, silence, write_audio_file
 from app.assets import AssetManager, AssetRequest, ResolvedAssets
 from app.bible import BibleRepository
 from app.config import Settings
@@ -66,6 +66,7 @@ class GenerationService:
         include_headings: bool,
         include_verse_numbers: bool,
         include_chapter_intro: bool,
+        chapter_intro_pause_seconds: float | None,
         force: bool,
         upload: bool,
         assets: AssetRequest | None = None,
@@ -73,6 +74,16 @@ class GenerationService:
     ) -> dict[str, Any]:
         if audio_format != "mp3":
             raise ValueError("Apenas format=mp3 é suportado no MVP")
+
+        pause_seconds = (
+            chapter_intro_pause_seconds
+            if chapter_intro_pause_seconds is not None
+            else self.settings.chapter_intro_pause_seconds
+        )
+        if pause_seconds < 0 or pause_seconds > 10:
+            raise ValueError("chapter_intro_pause_seconds deve estar entre 0 e 10")
+        if not include_chapter_intro:
+            pause_seconds = 0
 
         requested_voice_id = voice_id or self.settings.voice_id
 
@@ -114,6 +125,7 @@ class GenerationService:
             include_headings=include_headings,
             include_verse_numbers=include_verse_numbers,
             include_chapter_intro=include_chapter_intro,
+            chapter_intro_pause_seconds=pause_seconds,
             bitrate=bitrate,
         )
 
@@ -137,10 +149,38 @@ class GenerationService:
             x_vector_only_mode=self.settings.x_vector_only_mode,
         )
 
-        text_chunks = chunk_units(content.units, max_chars=self.settings.chunk_max_chars)
         audio_chunks = []
         chunk_metadata: list[dict[str, Any]] = []
-        for index, chunk_text in enumerate(text_chunks, start=1):
+        intro_units, body_units = split_intro_units(content.units, include_chapter_intro)
+
+        for intro_text in intro_units:
+            wav, sample_rate = self.tts.synthesize(
+                intro_text,
+                language=selected_language,
+                voice_clone_prompt=voice_clone_prompt,
+            )
+            audio_chunks.append((wav, sample_rate))
+            chunk_metadata.append(
+                {
+                    "index": len(chunk_metadata) + 1,
+                    "type": "chapter_intro",
+                    "text_chars": len(intro_text),
+                    "sample_rate": sample_rate,
+                }
+            )
+            if pause_seconds > 0:
+                audio_chunks.append((silence(pause_seconds, sample_rate), sample_rate))
+                chunk_metadata.append(
+                    {
+                        "index": len(chunk_metadata) + 1,
+                        "type": "silence",
+                        "duration_seconds": pause_seconds,
+                        "sample_rate": sample_rate,
+                    }
+                )
+
+        text_chunks = chunk_units(body_units, max_chars=self.settings.chunk_max_chars)
+        for chunk_text in text_chunks:
             wav, sample_rate = self.tts.synthesize(
                 chunk_text,
                 language=selected_language,
@@ -149,7 +189,8 @@ class GenerationService:
             audio_chunks.append((wav, sample_rate))
             chunk_metadata.append(
                 {
-                    "index": index,
+                    "index": len(chunk_metadata) + 1,
+                    "type": "text",
                     "text_chars": len(chunk_text),
                     "sample_rate": sample_rate,
                 }
@@ -178,6 +219,7 @@ class GenerationService:
             "include_headings": include_headings,
             "include_verse_numbers": include_verse_numbers,
             "include_chapter_intro": include_chapter_intro,
+            "chapter_intro_pause_seconds": pause_seconds,
             "chunks": chunk_metadata,
             "duration_seconds": duration_seconds,
             "sha256": audio_sha256,
@@ -207,6 +249,7 @@ class GenerationService:
         include_headings: bool,
         include_verse_numbers: bool,
         include_chapter_intro: bool,
+        chapter_intro_pause_seconds: float,
         bitrate: str,
     ) -> str:
         return stable_hash(
@@ -224,6 +267,7 @@ class GenerationService:
                 "include_headings": include_headings,
                 "include_verse_numbers": include_verse_numbers,
                 "include_chapter_intro": include_chapter_intro,
+                "chapter_intro_pause_seconds": chapter_intro_pause_seconds,
                 "bitrate": bitrate,
             }
         )
@@ -256,3 +300,9 @@ def chunk_units(units: list[str], max_chars: int) -> list[str]:
         chunks.append(" ".join(current))
 
     return chunks
+
+
+def split_intro_units(units: list[str], include_chapter_intro: bool) -> tuple[list[str], list[str]]:
+    if include_chapter_intro and units:
+        return [units[0]], units[1:]
+    return [], units

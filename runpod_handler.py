@@ -33,6 +33,7 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
         include_headings=parse_bool(payload.get("include_headings", False)),
         include_verse_numbers=parse_bool(payload.get("include_verse_numbers", False)),
         include_chapter_intro=parse_bool(payload.get("include_chapter_intro", True)),
+        chapter_intro_pause_seconds=parse_optional_float(payload.get("chapter_intro_pause_seconds")),
         force=parse_bool(payload.get("force", False)),
         upload=parse_bool(payload.get("upload", True)),
         assets=asset_request(payload.get("assets")),
@@ -60,6 +61,12 @@ def parse_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def parse_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 if __name__ == "__main__":
