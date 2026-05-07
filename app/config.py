@@ -40,7 +40,7 @@ class Settings:
     voice_id: str = os.getenv("VOICE_ID", "narrador_principal")
     default_language: str = os.getenv("DEFAULT_LANGUAGE", "Portuguese")
     x_vector_only_mode: bool = env_bool("X_VECTOR_ONLY_MODE", False)
-    chunk_max_chars: int = int(os.getenv("CHUNK_MAX_CHARS", "2000"))
+    generation_unit: str = os.getenv("GENERATION_UNIT", "chapter")
     chapter_intro_pause_seconds: float = float(os.getenv("CHAPTER_INTRO_PAUSE_SECONDS", "0.5"))
     public_base_url: str | None = os.getenv("PUBLIC_BASE_URL")
 

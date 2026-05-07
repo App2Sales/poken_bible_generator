@@ -58,7 +58,7 @@ class GenerateRequest(BaseModel):
     tts_backend: str | None = None
     model_id: str | None = None
     omnivoice: OmniVoiceOptions | None = None
-    chunk_max_chars: int | None = None
+    generation_unit: str | None = None
 
     class Config:
         extra = "ignore"
@@ -150,7 +150,7 @@ def generate(request: GenerateRequest) -> dict[str, Any]:
             tts_backend=request.tts_backend,
             model_id=request.model_id,
             omnivoice_options=to_omnivoice_options(request.omnivoice),
-            chunk_max_chars=request.chunk_max_chars,
+            generation_unit=request.generation_unit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

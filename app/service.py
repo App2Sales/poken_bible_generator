@@ -75,7 +75,7 @@ class GenerationService:
         tts_backend: str | None = None,
         model_id: str | None = None,
         omnivoice_options: dict[str, Any] | None = None,
-        chunk_max_chars: int | None = None,
+        generation_unit: str | None = None,
     ) -> dict[str, Any]:
         if audio_format != "mp3":
             raise ValueError("Apenas format=mp3 é suportado no MVP")
@@ -94,9 +94,7 @@ class GenerationService:
             )
 
         normalized_omnivoice_options = normalize_omnivoice_options(omnivoice_options)
-        selected_chunk_max_chars = chunk_max_chars if chunk_max_chars is not None else self.settings.chunk_max_chars
-        if selected_chunk_max_chars < 100 or selected_chunk_max_chars > 5000:
-            raise ValueError("chunk_max_chars deve estar entre 100 e 5000")
+        requested_generation_unit = normalize_generation_unit(generation_unit or self.settings.generation_unit)
 
         pause_seconds = (
             chapter_intro_pause_seconds
@@ -154,7 +152,7 @@ class GenerationService:
             tts_backend=selected_backend,
             model_id=selected_model_id,
             omnivoice_options=normalized_omnivoice_options,
-            chunk_max_chars=selected_chunk_max_chars,
+            requested_generation_unit=requested_generation_unit,
         )
 
         if not force and audio_path.exists() and metadata_path.exists():
@@ -179,7 +177,14 @@ class GenerationService:
 
         audio_chunks = []
         chunk_metadata: list[dict[str, Any]] = []
+        generation_unit_metadata: list[dict[str, Any]] = []
         intro_units, body_units = split_intro_units(content.units, include_chapter_intro)
+        generation_texts, effective_generation_unit, pericope_count = generation_texts_for_content(
+            content_pericopes=content.pericopes,
+            body_units=body_units,
+            requested_generation_unit=requested_generation_unit,
+            heading_count=content.heading_count,
+        )
 
         for intro_text in intro_units:
             wav, sample_rate = self.tts.synthesize(
@@ -208,8 +213,7 @@ class GenerationService:
                     }
                 )
 
-        text_chunks = chunk_units(body_units, max_chars=selected_chunk_max_chars)
-        for chunk_text in text_chunks:
+        for unit_index, chunk_text in enumerate(generation_texts, start=1):
             wav, sample_rate = self.tts.synthesize(
                 chunk_text,
                 language=selected_language,
@@ -220,7 +224,15 @@ class GenerationService:
             chunk_metadata.append(
                 {
                     "index": len(chunk_metadata) + 1,
-                    "type": "text",
+                    "type": effective_generation_unit,
+                    "text_chars": len(chunk_text),
+                    "sample_rate": sample_rate,
+                }
+            )
+            generation_unit_metadata.append(
+                {
+                    "index": unit_index,
+                    "type": effective_generation_unit,
                     "text_chars": len(chunk_text),
                     "sample_rate": sample_rate,
                 }
@@ -239,7 +251,10 @@ class GenerationService:
             "tts_mode": self.settings.tts_mode,
             "tts_backend": selected_backend,
             "omnivoice_options": normalized_omnivoice_options,
-            "chunk_max_chars": selected_chunk_max_chars,
+            "requested_generation_unit": requested_generation_unit,
+            "generation_unit": effective_generation_unit,
+            "pericope_count": pericope_count,
+            "heading_count": content.heading_count,
             "bible_db_sha256": resolved_assets.bible_db_sha256,
             "ref_audio_sha256": resolved_assets.ref_audio_sha256,
             "ref_text_sha256": resolved_assets.ref_text_sha256,
@@ -255,6 +270,7 @@ class GenerationService:
             "include_chapter_intro": include_chapter_intro,
             "chapter_intro_pause_seconds": pause_seconds,
             "chunks": chunk_metadata,
+            "generation_units": generation_unit_metadata,
             "duration_seconds": duration_seconds,
             "sha256": audio_sha256,
             "input_hash": input_hash,
@@ -288,7 +304,7 @@ class GenerationService:
         tts_backend: str,
         model_id: str,
         omnivoice_options: dict[str, Any] | None,
-        chunk_max_chars: int,
+        requested_generation_unit: str,
     ) -> str:
         return stable_hash(
             {
@@ -309,7 +325,7 @@ class GenerationService:
                 "chapter_intro_pause_seconds": chapter_intro_pause_seconds,
                 "bitrate": bitrate,
                 "omnivoice_options": omnivoice_options,
-                "chunk_max_chars": chunk_max_chars,
+                "requested_generation_unit": requested_generation_unit,
             }
         )
 
@@ -327,34 +343,36 @@ class GenerationService:
         return self._api_url(path)
 
 
-def chunk_units(units: list[str], max_chars: int) -> list[str]:
-    chunks: list[str] = []
-    current: list[str] = []
-    current_len = 0
-
-    for unit in units:
-        unit = unit.strip()
-        if not unit:
-            continue
-        projected = current_len + len(unit) + (1 if current else 0)
-        if current and projected > max_chars:
-            chunks.append(" ".join(current))
-            current = [unit]
-            current_len = len(unit)
-        else:
-            current.append(unit)
-            current_len = projected
-
-    if current:
-        chunks.append(" ".join(current))
-
-    return chunks
-
-
 def split_intro_units(units: list[str], include_chapter_intro: bool) -> tuple[list[str], list[str]]:
     if include_chapter_intro and units:
         return [units[0]], units[1:]
     return [], units
+
+
+def normalize_generation_unit(value: str | None) -> str:
+    unit = (value or "chapter").strip().lower()
+    if unit in {"chapter", "capitulo", "capítulo"}:
+        return "chapter"
+    if unit in {"pericope", "perícope", "pericope_group"}:
+        return "pericope"
+    raise ValueError("generation_unit deve ser 'chapter' ou 'pericope'")
+
+
+def generation_texts_for_content(
+    *,
+    content_pericopes: list[str],
+    body_units: list[str],
+    requested_generation_unit: str,
+    heading_count: int,
+) -> tuple[list[str], str, int]:
+    chapter_text = " ".join(unit.strip() for unit in body_units if unit.strip())
+    if not chapter_text:
+        return [], requested_generation_unit, 0
+
+    if requested_generation_unit == "pericope" and heading_count > 0 and content_pericopes:
+        return content_pericopes, "pericope", len(content_pericopes)
+
+    return [chapter_text], "chapter", 0
 
 
 def output_namespace_for_backend(backend: str | None) -> str:

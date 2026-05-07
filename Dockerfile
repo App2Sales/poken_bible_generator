@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VOICE_ID=narrador_principal \
     DEFAULT_LANGUAGE=Portuguese \
     X_VECTOR_ONLY_MODE=false \
-    CHUNK_MAX_CHARS=2000 \
+    GENERATION_UNIT=chapter \
     CHAPTER_INTRO_PAUSE_SECONDS=1.0
 
 RUN apt-get update \

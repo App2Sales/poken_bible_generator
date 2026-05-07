@@ -22,6 +22,8 @@ class ChapterContent:
     chapter: int
     text: str
     units: list[str]
+    pericopes: list[str]
+    heading_count: int
 
 
 class BibleRepository:
@@ -99,15 +101,33 @@ class BibleRepository:
         if include_chapter_intro:
             units.append(f"{resolved.title}, capítulo {chapter}.")
 
+        pericopes: list[list[str]] = []
+        current_pericope: list[str] = []
+        heading_count = 0
+
         for row in rows:
-            if row["head"] and not include_headings:
-                continue
+            is_heading = bool(row["head"])
             text = " ".join(str(row["text"] or "").split())
             if not text:
                 continue
+
+            if is_heading:
+                heading_count += 1
+                if current_pericope:
+                    pericopes.append(current_pericope)
+                    current_pericope = []
+                if not include_headings:
+                    continue
+
             if include_verse_numbers and int(row["verse"] or 0) > 0:
                 text = f"Versículo {int(row['verse'])}. {text}"
             units.append(text)
+            current_pericope.append(text)
+
+        if current_pericope:
+            pericopes.append(current_pericope)
+
+        pericope_texts = [" ".join(pericope) for pericope in pericopes if pericope]
 
         return ChapterContent(
             book_id=resolved.book_id,
@@ -115,4 +135,6 @@ class BibleRepository:
             chapter=chapter,
             text="\n".join(units),
             units=units,
+            pericopes=pericope_texts,
+            heading_count=heading_count,
         )
