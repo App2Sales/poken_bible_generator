@@ -27,6 +27,7 @@ def main() -> int:
     parser.add_argument("--language", default="Portuguese")
     parser.add_argument("--tts-backend")
     parser.add_argument("--model-id")
+    parser.add_argument("--chunk-max-chars", type=int)
     parser.add_argument("--omnivoice-num-step", type=int)
     parser.add_argument("--omnivoice-guidance-scale", type=float)
     parser.add_argument("--omnivoice-denoise", action="store_true")
@@ -70,6 +71,8 @@ def main() -> int:
             payload["tts_backend"] = args.tts_backend
         if args.model_id:
             payload["model_id"] = args.model_id
+        if args.chunk_max_chars is not None:
+            payload["chunk_max_chars"] = args.chunk_max_chars
         omnivoice = {
             key: value
             for key, value in {

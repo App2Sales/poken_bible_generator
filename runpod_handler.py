@@ -41,6 +41,7 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
         tts_backend=payload.get("tts_backend"),
         model_id=payload.get("model_id"),
         omnivoice_options=payload.get("omnivoice") or payload.get("omnivoice_options"),
+        chunk_max_chars=parse_optional_int(payload.get("chunk_max_chars")),
     )
 
 
@@ -71,6 +72,12 @@ def parse_optional_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def parse_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
 
 
 if __name__ == "__main__":

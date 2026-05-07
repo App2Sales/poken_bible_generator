@@ -75,6 +75,7 @@ class GenerationService:
         tts_backend: str | None = None,
         model_id: str | None = None,
         omnivoice_options: dict[str, Any] | None = None,
+        chunk_max_chars: int | None = None,
     ) -> dict[str, Any]:
         if audio_format != "mp3":
             raise ValueError("Apenas format=mp3 é suportado no MVP")
@@ -92,9 +93,10 @@ class GenerationService:
                 "Reinicie a API com MODEL_ID=%s para usar esse modelo." % selected_model_id
             )
 
-        normalized_omnivoice_options = (
-            normalize_omnivoice_options(omnivoice_options) if selected_backend == "omnivoice" else None
-        )
+        normalized_omnivoice_options = normalize_omnivoice_options(omnivoice_options)
+        selected_chunk_max_chars = chunk_max_chars if chunk_max_chars is not None else self.settings.chunk_max_chars
+        if selected_chunk_max_chars < 100 or selected_chunk_max_chars > 5000:
+            raise ValueError("chunk_max_chars deve estar entre 100 e 5000")
 
         pause_seconds = (
             chapter_intro_pause_seconds
@@ -152,6 +154,7 @@ class GenerationService:
             tts_backend=selected_backend,
             model_id=selected_model_id,
             omnivoice_options=normalized_omnivoice_options,
+            chunk_max_chars=selected_chunk_max_chars,
         )
 
         if not force and audio_path.exists() and metadata_path.exists():
@@ -205,7 +208,7 @@ class GenerationService:
                     }
                 )
 
-        text_chunks = chunk_units(body_units, max_chars=self.settings.chunk_max_chars)
+        text_chunks = chunk_units(body_units, max_chars=selected_chunk_max_chars)
         for chunk_text in text_chunks:
             wav, sample_rate = self.tts.synthesize(
                 chunk_text,
@@ -236,6 +239,7 @@ class GenerationService:
             "tts_mode": self.settings.tts_mode,
             "tts_backend": selected_backend,
             "omnivoice_options": normalized_omnivoice_options,
+            "chunk_max_chars": selected_chunk_max_chars,
             "bible_db_sha256": resolved_assets.bible_db_sha256,
             "ref_audio_sha256": resolved_assets.ref_audio_sha256,
             "ref_text_sha256": resolved_assets.ref_text_sha256,
@@ -284,6 +288,7 @@ class GenerationService:
         tts_backend: str,
         model_id: str,
         omnivoice_options: dict[str, Any] | None,
+        chunk_max_chars: int,
     ) -> str:
         return stable_hash(
             {
@@ -304,6 +309,7 @@ class GenerationService:
                 "chapter_intro_pause_seconds": chapter_intro_pause_seconds,
                 "bitrate": bitrate,
                 "omnivoice_options": omnivoice_options,
+                "chunk_max_chars": chunk_max_chars,
             }
         )
 
@@ -352,9 +358,7 @@ def split_intro_units(units: list[str], include_chapter_intro: bool) -> tuple[li
 
 
 def output_namespace_for_backend(backend: str | None) -> str:
-    if backend is None or backend == "default":
-        return "default"
+    if backend is None:
+        return "omnivoice"
     normalized = normalize_backend(backend)
-    if normalized == "qwen3":
-        return "default"
     return normalized

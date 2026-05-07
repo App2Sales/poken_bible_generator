@@ -1,4 +1,0 @@
-# Install this on top of requirements.txt only for workers started with TTS_BACKEND=omnivoice.
-# The Hugging Face Space currently runs OmniVoice with torch/torchaudio 2.8 on CUDA 12.8;
-# keep those pins outside the base requirements to avoid disrupting the stable Qwen worker.
-omnivoice>=0.1.5

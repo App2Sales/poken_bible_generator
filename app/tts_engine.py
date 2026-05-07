@@ -53,12 +53,7 @@ class TTSEngine:
                 f"TTS_MODE={self.mode!r} não é suportado neste MVP. Use TTS_MODE=voice_clone."
             )
 
-        if self.backend == "qwen3":
-            self._load_qwen3_model()
-        elif self.backend == "omnivoice":
-            self._load_omnivoice_model()
-        else:
-            raise ValueError(f"TTS_BACKEND não suportado: {self.backend}")
+        self._load_omnivoice_model()
 
         logger.info(
             "Modelo TTS carregado uma vez no startup: backend=%s model_id=%s mode=%s",
@@ -66,28 +61,6 @@ class TTSEngine:
             self.model_id,
             self.mode,
         )
-
-    def _load_qwen3_model(self) -> None:
-        import torch
-
-        model_cls = _import_qwen3_tts_model()
-        try:
-            self.model = model_cls.from_pretrained(
-                self.model_id,
-                device_map="cuda:0",
-                dtype=torch.bfloat16,
-                attn_implementation="flash_attention_2",
-            )
-        except Exception as exc:
-            logger.warning(
-                "Falha ao carregar com flash_attention_2; tentando sem attn_implementation: %s",
-                exc,
-            )
-            self.model = model_cls.from_pretrained(
-                self.model_id,
-                device_map="cuda:0",
-                dtype=torch.bfloat16,
-            )
 
     def _load_omnivoice_model(self) -> None:
         import torch
@@ -118,21 +91,12 @@ class TTSEngine:
 
         cache_key = (voice_id, ref_audio_sha256, ref_text_sha256, x_vector_only_mode, self.backend)
         if cache_key not in self._prompt_cache:
-            if self.backend == "qwen3":
-                self._prompt_cache[cache_key] = self.model.create_voice_clone_prompt(
-                    ref_audio=ref_audio_path,
-                    ref_text=ref_text,
-                    x_vector_only_mode=x_vector_only_mode,
-                )
-            elif self.backend == "omnivoice":
-                if x_vector_only_mode:
-                    logger.warning("OmniVoice não usa X_VECTOR_ONLY_MODE; usando ref_text quando disponível.")
-                self._prompt_cache[cache_key] = self.model.create_voice_clone_prompt(
-                    ref_audio=ref_audio_path,
-                    ref_text=ref_text,
-                )
-            else:
-                raise ValueError(f"TTS_BACKEND não suportado: {self.backend}")
+            if x_vector_only_mode:
+                logger.warning("OmniVoice não usa X_VECTOR_ONLY_MODE; usando ref_text quando disponível.")
+            self._prompt_cache[cache_key] = self.model.create_voice_clone_prompt(
+                ref_audio=ref_audio_path,
+                ref_text=ref_text,
+            )
             logger.info(
                 "Voice clone prompt criado e cacheado: backend=%s voice_id=%s ref_audio_sha256=%s ref_text_sha256=%s",
                 self.backend,
@@ -164,14 +128,6 @@ class TTSEngine:
         prompt = voice_clone_prompt or self.voice_clone_prompt
         if prompt is None:
             raise RuntimeError("voice_clone_prompt não foi criado para esta voz.")
-
-        if self.mode == "voice_clone" and self.backend == "qwen3":
-            wavs, sr = self.model.generate_voice_clone(
-                text=text,
-                language=language,
-                voice_clone_prompt=prompt,
-            )
-            return wavs[0], sr
 
         if self.mode == "voice_clone" and self.backend == "omnivoice":
             options = normalize_omnivoice_options(omnivoice_options)
@@ -216,33 +172,11 @@ class TTSEngine:
         }
 
 
-def _import_qwen3_tts_model():
-    candidates = (
-        ("qwen3_tts", "Qwen3TTSModel"),
-        ("qwen_tts", "Qwen3TTSModel"),
-        ("qwen3_tts.modeling_qwen3_tts", "Qwen3TTSModel"),
-    )
-    errors: list[str] = []
-    for module_name, attr_name in candidates:
-        try:
-            module = importlib.import_module(module_name)
-            return getattr(module, attr_name)
-        except Exception as exc:
-            errors.append(f"{module_name}.{attr_name}: {exc}")
-
-    raise ImportError(
-        "Não foi possível importar Qwen3TTSModel. Instale o pacote do Qwen3 TTS que expõe "
-        "Qwen3TTSModel.from_pretrained(...). Tentativas: " + "; ".join(errors)
-    )
-
-
 def normalize_backend(value: str | None) -> str:
-    backend = (value or "qwen3").strip().lower()
-    if backend in {"qwen", "qwen3", "qwen3_tts"}:
-        return "qwen3"
+    backend = (value or "omnivoice").strip().lower()
     if backend in {"omnivoice", "omni_voice"}:
         return "omnivoice"
-    raise ValueError(f"TTS_BACKEND não suportado: {value}")
+    raise ValueError(f"TTS_BACKEND não suportado: {value}. Use TTS_BACKEND=omnivoice.")
 
 
 def normalize_omnivoice_options(options: dict[str, Any] | None) -> dict[str, Any]:

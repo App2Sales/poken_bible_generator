@@ -5,19 +5,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
     BIBLE_DB_PATH=/data/bible.sqlite \
     OUTPUT_DIR=/outputs \
     ASSET_CACHE_DIR=/data/assets \
-    TTS_BACKEND=qwen3 \
-    MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
+    TTS_BACKEND=omnivoice \
+    MODEL_ID=k2-fsa/OmniVoice \
     TTS_MODE=voice_clone \
     REF_AUDIO_PATH=/data/voices/narrador.wav \
     REF_TEXT_PATH=/data/voices/narrador.txt \
     VOICE_ID=narrador_principal \
     DEFAULT_LANGUAGE=Portuguese \
     X_VECTOR_ONLY_MODE=false \
-    CHUNK_MAX_CHARS=400 \
+    CHUNK_MAX_CHARS=2000 \
     CHAPTER_INTRO_PAUSE_SECONDS=1.0
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg libsndfile1 sox \
+    && apt-get install -y --no-install-recommends python3 python3-pip ffmpeg libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
