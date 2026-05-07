@@ -244,6 +244,7 @@ class GenerationService:
                 "ref_audio_url": resolved_assets.ref_audio_url,
                 "ref_text_url": resolved_assets.ref_text_url,
             },
+            "ref_text_source": resolved_assets.ref_text_source,
             "language": selected_language,
             "include_headings": include_headings,
             "include_verse_numbers": include_verse_numbers,

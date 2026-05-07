@@ -112,7 +112,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   "assets": {
     "bible_db_url": "https://exemplo.com/bible.sqlite",
     "ref_audio_url": "https://exemplo.com/narrador.wav",
-    "ref_text_url": "https://exemplo.com/narrador.txt"
+    "ref_text_url": "https://exemplo.com/narrador.txt",
+    "ref_text": null
   }
 }
 ```
@@ -138,6 +139,7 @@ Resposta esperada:
   "bible_db_sha256": "...",
   "ref_audio_sha256": "...",
   "ref_text_sha256": "...",
+  "ref_text_source": "url",
   "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
   "tts_mode": "voice_clone",
   "tts_backend": "qwen3",
@@ -180,7 +182,7 @@ curl -L "http://127.0.0.1:8000/download/salmos/23?backend=omnivoice" -o salmos_0
 curl -L "http://127.0.0.1:8000/download/salmos/23/metadata?backend=omnivoice" -o salmos_023_omnivoice.json
 ```
 
-## Assets por URL
+## Assets por Request
 
 Você pode trocar o SQLite, o áudio e a transcrição por chamada REST usando `assets`:
 
@@ -194,22 +196,35 @@ Você pode trocar o SQLite, o áudio e a transcrição por chamada REST usando `
 }
 ```
 
+Também é possível enviar a transcrição diretamente como texto, sem hospedar um arquivo:
+
+```json
+{
+  "assets": {
+    "bible_db_url": "https://exemplo.com/bible.sqlite",
+    "ref_audio_url": "https://exemplo.com/narrador.wav",
+    "ref_text": "Olá pessoal, aqui o pastor Augustus com mais um áudio matinal. Provérbios 1 de 30 a 31."
+  }
+}
+```
+
 Regras:
 
 - URLs precisam ser `http` ou `https` e acessíveis pelo worker RunPod.
 - Arquivos baixados são armazenados por SHA-256 em `ASSET_CACHE_DIR`, com índice por URL para evitar novo download a cada capítulo.
 - Jobs com os mesmos arquivos reutilizam os assets já baixados e o mesmo `voice_clone_prompt` em memória.
 - Se você trocar o arquivo mantendo a mesma URL, envie `force=true` para baixar novamente e atualizar o cache.
-- Se `X_VECTOR_ONLY_MODE=false`, `ref_text_url` ou `REF_TEXT_PATH` precisa existir e conter a transcrição exata.
+- Se `X_VECTOR_ONLY_MODE=false`, `assets.ref_text`, `assets.ref_text_url` ou `REF_TEXT_PATH` precisa existir e conter a transcrição exata.
+- Envie apenas um de `assets.ref_text` ou `assets.ref_text_url`; enviar os dois na mesma chamada é rejeitado.
 - Se `assets.bible_db_url` não for enviado, usa `BIBLE_DB_PATH`.
 - Se `assets.ref_audio_url` não for enviado, usa `REF_AUDIO_PATH`.
-- Se `assets.ref_text_url` não for enviado, usa `REF_TEXT_PATH`.
+- Se nem `assets.ref_text` nem `assets.ref_text_url` forem enviados, usa `REF_TEXT_PATH`.
 
 ## Cache e Metadata
 
 O `input_hash` considera `book_id`, `chapter`, texto completo do capítulo, `model_id`, `tts_mode`, `tts_backend`, `voice_id`, SHA-256 do SQLite, SHA-256 do áudio de referência, SHA-256 da transcrição, idioma, flags de inclusão, pausa do título, `bitrate` e opções OmniVoice normalizadas quando aplicável.
 
-O metadata JSON é salvo em `/outputs/<namespace>/<livro>/metadata/<livro>_<capitulo>.json` e inclui `bible_db_sha256`, `ref_audio_sha256`, `ref_text_sha256`, URLs dos assets, chunks, duração, SHA-256 do áudio e `input_hash`. O namespace padrão do Qwen é `default`; o namespace OmniVoice é `omnivoice`.
+O metadata JSON é salvo em `/outputs/<namespace>/<livro>/metadata/<livro>_<capitulo>.json` e inclui `bible_db_sha256`, `ref_audio_sha256`, `ref_text_sha256`, `ref_text_source`, URLs dos assets, chunks, duração, SHA-256 do áudio e `input_hash`. O namespace padrão do Qwen é `default`; o namespace OmniVoice é `omnivoice`.
 
 ## Pausa Após Título
 
@@ -327,7 +342,7 @@ Formato de chamada:
     "assets": {
       "bible_db_url": "https://exemplo.com/bible.sqlite",
       "ref_audio_url": "https://exemplo.com/narrador.wav",
-      "ref_text_url": "https://exemplo.com/narrador.txt"
+      "ref_text": "Texto exato do áudio de referência"
     }
   },
   "policy": {
@@ -382,4 +397,16 @@ python scripts/generate_psalms.py \
   --bible-db-url https://exemplo.com/bible.sqlite \
   --ref-audio-url https://exemplo.com/narrador.wav \
   --ref-text-url https://exemplo.com/narrador.txt
+```
+
+Com transcrição inline:
+
+```bash
+python scripts/generate_psalms.py \
+  --api-url http://127.0.0.1:8000/generate \
+  --start 1 \
+  --end 150 \
+  --bible-db-url https://exemplo.com/bible.sqlite \
+  --ref-audio-url https://exemplo.com/narrador.wav \
+  --ref-text "Texto exato do áudio de referência"
 ```

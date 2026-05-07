@@ -36,6 +36,7 @@ def main() -> int:
     parser.add_argument("--bible-db-url")
     parser.add_argument("--ref-audio-url")
     parser.add_argument("--ref-text-url")
+    parser.add_argument("--ref-text")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--no-upload", action="store_true")
     args = parser.parse_args()
@@ -46,6 +47,7 @@ def main() -> int:
             "bible_db_url": args.bible_db_url,
             "ref_audio_url": args.ref_audio_url,
             "ref_text_url": args.ref_text_url,
+            "ref_text": args.ref_text,
         }.items()
         if value
     }

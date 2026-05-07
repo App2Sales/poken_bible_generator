@@ -48,11 +48,12 @@ def asset_request(value: Any) -> AssetRequest | None:
     if not value:
         return None
     if not isinstance(value, dict):
-        raise ValueError("assets deve ser um objeto com bible_db_url, ref_audio_url e/ou ref_text_url")
+        raise ValueError("assets deve ser um objeto com bible_db_url, ref_audio_url, ref_text_url e/ou ref_text")
     return AssetRequest(
         bible_db_url=value.get("bible_db_url"),
         ref_audio_url=value.get("ref_audio_url"),
         ref_text_url=value.get("ref_text_url"),
+        ref_text=value.get("ref_text"),
     )
 
 

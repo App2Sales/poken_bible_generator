@@ -21,6 +21,7 @@ class AssetRequest:
     bible_db_url: str | None = None
     ref_audio_url: str | None = None
     ref_text_url: str | None = None
+    ref_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class ResolvedAssets:
     bible_db_url: str | None
     ref_audio_url: str | None
     ref_text_url: str | None
+    ref_text_source: str
 
 
 class AssetManager:
@@ -60,43 +62,39 @@ class AssetManager:
             force_download=force_download,
         )
 
-        if request.ref_text_url:
+        if request.ref_text is not None and request.ref_text_url:
+            raise ValueError("Envie apenas um de assets.ref_text ou assets.ref_text_url")
+
+        if request.ref_text is not None:
+            ref_text_path = None
+            ref_text = clean_reference_text(request.ref_text)
+            if not ref_text and not x_vector_only_mode:
+                raise ValueError(
+                    "assets.ref_text está vazio. REF_TEXT é obrigatório quando TTS_MODE=voice_clone e X_VECTOR_ONLY_MODE=false."
+                )
+            ref_text_sha256 = text_sha256(ref_text) if ref_text else None
+            ref_text_source = "inline"
+        elif request.ref_text_url:
             ref_text_path = self._download(
                 request.ref_text_url,
                 subdir="voices",
                 suffix=".txt",
                 force_download=force_download,
             )
+            ref_text, ref_text_sha256 = self._read_ref_text(ref_text_path, x_vector_only_mode=x_vector_only_mode)
+            ref_text_source = "url"
         else:
             ref_text_path = Path(self.settings.ref_text_path)
+            ref_text, ref_text_sha256 = self._read_ref_text(ref_text_path, x_vector_only_mode=x_vector_only_mode)
+            ref_text_source = "path"
 
         self._require_file(bible_db_path, "BIBLE_DB_PATH")
         self._require_file(ref_audio_path, "REF_AUDIO_PATH")
 
-        if not ref_text_path.exists():
-            if x_vector_only_mode:
-                logger.warning(
-                    "REF_TEXT_PATH não existe e X_VECTOR_ONLY_MODE=true; modo permitido apenas para teste e com qualidade potencialmente menor."
-                )
-                ref_text = ""
-                ref_text_sha256 = None
-            else:
-                raise FileNotFoundError(
-                    "REF_TEXT_PATH não existe: "
-                    f"{ref_text_path}. REF_TEXT é obrigatório quando TTS_MODE=voice_clone e X_VECTOR_ONLY_MODE=false."
-                )
-        else:
-            ref_text = clean_reference_text(ref_text_path.read_text(encoding="utf-8"))
-            if not ref_text and not x_vector_only_mode:
-                raise ValueError(
-                    "REF_TEXT_PATH está vazio. REF_TEXT é obrigatório quando TTS_MODE=voice_clone e X_VECTOR_ONLY_MODE=false."
-                )
-            ref_text_sha256 = text_sha256(ref_text)
-
         return ResolvedAssets(
             bible_db_path=str(bible_db_path),
             ref_audio_path=str(ref_audio_path),
-            ref_text_path=str(ref_text_path) if ref_text_path.exists() else None,
+            ref_text_path=str(ref_text_path) if ref_text_path and ref_text_path.exists() else None,
             ref_text=ref_text,
             bible_db_sha256=file_sha256(bible_db_path),
             ref_audio_sha256=file_sha256(ref_audio_path),
@@ -104,7 +102,27 @@ class AssetManager:
             bible_db_url=request.bible_db_url,
             ref_audio_url=request.ref_audio_url,
             ref_text_url=request.ref_text_url,
+            ref_text_source=ref_text_source,
         )
+
+    def _read_ref_text(self, ref_text_path: Path, *, x_vector_only_mode: bool) -> tuple[str, str | None]:
+        if not ref_text_path.exists():
+            if x_vector_only_mode:
+                logger.warning(
+                    "REF_TEXT_PATH não existe e X_VECTOR_ONLY_MODE=true; modo permitido apenas para teste e com qualidade potencialmente menor."
+                )
+                return "", None
+            raise FileNotFoundError(
+                "REF_TEXT_PATH não existe: "
+                f"{ref_text_path}. REF_TEXT é obrigatório quando TTS_MODE=voice_clone e X_VECTOR_ONLY_MODE=false."
+            )
+
+        ref_text = clean_reference_text(ref_text_path.read_text(encoding="utf-8"))
+        if not ref_text and not x_vector_only_mode:
+            raise ValueError(
+                "REF_TEXT_PATH está vazio. REF_TEXT é obrigatório quando TTS_MODE=voice_clone e X_VECTOR_ONLY_MODE=false."
+            )
+        return ref_text, text_sha256(ref_text) if ref_text else None
 
     def _path_from_url_or_default(
         self,

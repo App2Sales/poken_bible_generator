@@ -23,6 +23,7 @@ class AssetsRequest(BaseModel):
     bible_db_url: str | None = None
     ref_audio_url: str | None = None
     ref_text_url: str | None = None
+    ref_text: str | None = None
 
 
 class OmniVoiceOptions(BaseModel):
@@ -162,6 +163,7 @@ def to_asset_request(assets: AssetsRequest | None) -> AssetRequest | None:
         bible_db_url=assets.bible_db_url,
         ref_audio_url=assets.ref_audio_url,
         ref_text_url=assets.ref_text_url,
+        ref_text=assets.ref_text,
     )
 
 
