@@ -7,7 +7,7 @@ from typing import Any
 
 from app.audio import probe_duration_seconds, silence, write_audio_file
 from app.assets import AssetManager, AssetRequest, ResolvedAssets
-from app.bible import BibleRepository
+from app.bible import BibleRepository, PericopeContent
 from app.config import Settings
 from app.tts_engine import TTSEngine, normalize_backend, normalize_omnivoice_options
 from app.utils import file_sha256, slugify, stable_hash
@@ -179,7 +179,7 @@ class GenerationService:
         chunk_metadata: list[dict[str, Any]] = []
         generation_unit_metadata: list[dict[str, Any]] = []
         intro_units, body_units = split_intro_units(content.units, include_chapter_intro)
-        generation_texts, effective_generation_unit, pericope_count = generation_texts_for_content(
+        generation_units, effective_generation_unit, pericope_count = generation_units_for_content(
             content_pericopes=content.pericopes,
             body_units=body_units,
             requested_generation_unit=requested_generation_unit,
@@ -213,7 +213,8 @@ class GenerationService:
                     }
                 )
 
-        for unit_index, chunk_text in enumerate(generation_texts, start=1):
+        for unit_index, generation_unit in enumerate(generation_units, start=1):
+            chunk_text = str(generation_unit["text"])
             wav, sample_rate = self.tts.synthesize(
                 chunk_text,
                 language=selected_language,
@@ -229,14 +230,19 @@ class GenerationService:
                     "sample_rate": sample_rate,
                 }
             )
-            generation_unit_metadata.append(
-                {
-                    "index": unit_index,
-                    "type": effective_generation_unit,
-                    "text_chars": len(chunk_text),
-                    "sample_rate": sample_rate,
-                }
-            )
+            unit_metadata = {
+                "index": unit_index,
+                "type": generation_unit["type"],
+                "text_chars": len(chunk_text),
+                "sample_rate": sample_rate,
+            }
+            if generation_unit.get("title"):
+                unit_metadata["title"] = generation_unit["title"]
+            if generation_unit.get("start_verse") is not None:
+                unit_metadata["start_verse"] = generation_unit["start_verse"]
+            if generation_unit.get("end_verse") is not None:
+                unit_metadata["end_verse"] = generation_unit["end_verse"]
+            generation_unit_metadata.append(unit_metadata)
 
         fallback_duration = write_audio_file(audio_chunks, audio_path, bitrate)
         duration_seconds = round(probe_duration_seconds(audio_path, fallback_duration), 2)
@@ -358,21 +364,32 @@ def normalize_generation_unit(value: str | None) -> str:
     raise ValueError("generation_unit deve ser 'chapter' ou 'pericope'")
 
 
-def generation_texts_for_content(
+def generation_units_for_content(
     *,
-    content_pericopes: list[str],
+    content_pericopes: list[PericopeContent],
     body_units: list[str],
     requested_generation_unit: str,
     heading_count: int,
-) -> tuple[list[str], str, int]:
+) -> tuple[list[dict[str, Any]], str, int]:
     chapter_text = " ".join(unit.strip() for unit in body_units if unit.strip())
     if not chapter_text:
         return [], requested_generation_unit, 0
 
     if requested_generation_unit == "pericope" and heading_count > 0 and content_pericopes:
-        return content_pericopes, "pericope", len(content_pericopes)
+        units = [
+            {
+                "type": "pericope",
+                "text": pericope.text,
+                "title": pericope.title,
+                "start_verse": pericope.start_verse,
+                "end_verse": pericope.end_verse,
+            }
+            for pericope in content_pericopes
+            if pericope.text.strip()
+        ]
+        return units, "pericope", len(units)
 
-    return [chapter_text], "chapter", 0
+    return [{"type": "chapter", "text": chapter_text}], "chapter", 0
 
 
 def output_namespace_for_backend(backend: str | None) -> str:

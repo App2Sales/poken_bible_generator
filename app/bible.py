@@ -16,13 +16,21 @@ class Book:
 
 
 @dataclass(frozen=True)
+class PericopeContent:
+    title: str | None
+    start_verse: int | None
+    end_verse: int | None
+    text: str
+
+
+@dataclass(frozen=True)
 class ChapterContent:
     book_id: int
     book: str
     chapter: int
     text: str
     units: list[str]
-    pericopes: list[str]
+    pericopes: list[PericopeContent]
     heading_count: int
 
 
@@ -117,9 +125,23 @@ class BibleRepository:
             for row in pericope_rows
             if row["verse"] is not None and str(row["title"] or "").strip()
         }
-        pericopes: list[list[str]] = []
+        pericopes: list[PericopeContent] = []
         current_pericope: list[str] = []
+        current_title: str | None = None
+        current_start_verse: int | None = None
+        current_end_verse: int | None = None
         heading_count = len(pericope_titles_by_verse)
+
+        def append_current_pericope() -> None:
+            if current_pericope:
+                pericopes.append(
+                    PericopeContent(
+                        title=current_title,
+                        start_verse=current_start_verse,
+                        end_verse=current_end_verse,
+                        text=" ".join(current_pericope),
+                    )
+                )
 
         for row in rows:
             if bool(row["head"]):
@@ -129,8 +151,11 @@ class BibleRepository:
             pericope_title = pericope_titles_by_verse.get(verse)
             if pericope_title:
                 if current_pericope:
-                    pericopes.append(current_pericope)
+                    append_current_pericope()
                     current_pericope = []
+                current_title = pericope_title
+                current_start_verse = verse
+                current_end_verse = None
                 if include_headings:
                     units.append(pericope_title)
                     current_pericope.append(pericope_title)
@@ -142,12 +167,14 @@ class BibleRepository:
             if include_verse_numbers and verse > 0:
                 text = f"Versículo {verse}. {text}"
             units.append(text)
+            if current_start_verse is None and verse > 0:
+                current_start_verse = verse
+            if verse > 0:
+                current_end_verse = verse
             current_pericope.append(text)
 
         if current_pericope:
-            pericopes.append(current_pericope)
-
-        pericope_texts = [" ".join(pericope) for pericope in pericopes if pericope]
+            append_current_pericope()
 
         return ChapterContent(
             book_id=resolved.book_id,
@@ -155,7 +182,7 @@ class BibleRepository:
             chapter=chapter,
             text="\n".join(units),
             units=units,
-            pericopes=pericope_texts,
+            pericopes=pericopes,
             heading_count=heading_count,
         )
 

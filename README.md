@@ -95,6 +95,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 Resposta inclui `requested_generation_unit`, `generation_unit`, `generation_units`, `tts_backend`, `omnivoice_options`, hashes dos assets, chunks de áudio, duração, SHA-256 do MP3 e `input_hash`.
 
+Quando `generation_unit=pericope`, cada item de `generation_units` registra `title`, `start_verse`, `end_verse`, `text_chars` e `sample_rate`.
+
 `chapter` envia o corpo inteiro do capítulo em uma chamada `model.generate()`. `pericope` agrupa pelos versículos iniciais registrados na tabela opcional `pericopes`; se o banco não tiver perícopes, o modo efetivo cai para `chapter` e a metadata registra `requested_generation_unit` diferente de `generation_unit`.
 
 Para `pericope`, o app lê a tabela opcional `pericopes`. A tabela `texts` não é alterada, preservando compatibilidade com apps existentes que usam o mesmo SQLite.
