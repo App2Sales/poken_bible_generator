@@ -9,7 +9,7 @@ from app.audio import probe_duration_seconds, silence, write_audio_file
 from app.assets import AssetManager, AssetRequest, ResolvedAssets
 from app.bible import BibleRepository
 from app.config import Settings
-from app.tts_engine import TTSEngine
+from app.tts_engine import TTSEngine, normalize_backend, normalize_omnivoice_options
 from app.utils import file_sha256, slugify, stable_hash
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ class GenerationService:
         self.tts = TTSEngine(
             settings.model_id,
             settings.tts_mode,
+            backend=settings.tts_backend,
             voice_id=settings.voice_id,
             x_vector_only_mode=settings.x_vector_only_mode,
         )
@@ -71,9 +72,29 @@ class GenerationService:
         upload: bool,
         assets: AssetRequest | None = None,
         narration_style: str | None = None,
+        tts_backend: str | None = None,
+        model_id: str | None = None,
+        omnivoice_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if audio_format != "mp3":
             raise ValueError("Apenas format=mp3 é suportado no MVP")
+
+        selected_backend = normalize_backend(tts_backend or self.settings.tts_backend)
+        selected_model_id = model_id or self.settings.model_id
+        if selected_backend != self.tts.backend:
+            raise ValueError(
+                "tts_backend diferente do backend carregado no worker. "
+                "Reinicie a API com TTS_BACKEND=%s para usar esse backend." % selected_backend
+            )
+        if selected_model_id != self.tts.model_id:
+            raise ValueError(
+                "model_id diferente do modelo carregado no worker. "
+                "Reinicie a API com MODEL_ID=%s para usar esse modelo." % selected_model_id
+            )
+
+        normalized_omnivoice_options = (
+            normalize_omnivoice_options(omnivoice_options) if selected_backend == "omnivoice" else None
+        )
 
         pause_seconds = (
             chapter_intro_pause_seconds
@@ -111,7 +132,8 @@ class GenerationService:
         )
         book_slug = slugify(content.book)
         chapter_name = f"{book_slug}_{chapter:03d}"
-        output_root = Path(self.settings.output_dir) / "default" / book_slug
+        output_namespace = output_namespace_for_backend(selected_backend)
+        output_root = Path(self.settings.output_dir) / output_namespace / book_slug
         audio_path = output_root / f"{chapter_name}.mp3"
         metadata_path = output_root / "metadata" / f"{chapter_name}.json"
 
@@ -127,6 +149,9 @@ class GenerationService:
             include_chapter_intro=include_chapter_intro,
             chapter_intro_pause_seconds=pause_seconds,
             bitrate=bitrate,
+            tts_backend=selected_backend,
+            model_id=selected_model_id,
+            omnivoice_options=normalized_omnivoice_options,
         )
 
         if not force and audio_path.exists() and metadata_path.exists():
@@ -134,9 +159,9 @@ class GenerationService:
             if metadata.get("input_hash") == input_hash:
                 metadata["status"] = "completed"
                 metadata["audio_path"] = str(audio_path)
-                metadata["audio_url"] = self._api_url(f"/download/{book_slug}/{chapter}")
+                metadata["audio_url"] = self._download_url(book_slug, chapter, output_namespace)
                 metadata["metadata_path"] = str(metadata_path)
-                metadata["metadata_url"] = self._api_url(f"/download/{book_slug}/{chapter}/metadata")
+                metadata["metadata_url"] = self._download_url(book_slug, chapter, output_namespace, metadata=True)
                 return metadata
 
         voice_clone_prompt = self.tts.get_voice_clone_prompt(
@@ -158,6 +183,7 @@ class GenerationService:
                 intro_text,
                 language=selected_language,
                 voice_clone_prompt=voice_clone_prompt,
+                omnivoice_options=normalized_omnivoice_options,
             )
             audio_chunks.append((wav, sample_rate))
             chunk_metadata.append(
@@ -185,6 +211,7 @@ class GenerationService:
                 chunk_text,
                 language=selected_language,
                 voice_clone_prompt=voice_clone_prompt,
+                omnivoice_options=normalized_omnivoice_options,
             )
             audio_chunks.append((wav, sample_rate))
             chunk_metadata.append(
@@ -205,8 +232,10 @@ class GenerationService:
             "book": content.book,
             "chapter": chapter,
             "voice_id": requested_voice_id,
-            "model_id": self.settings.model_id,
+            "model_id": selected_model_id,
             "tts_mode": self.settings.tts_mode,
+            "tts_backend": selected_backend,
+            "omnivoice_options": normalized_omnivoice_options,
             "bible_db_sha256": resolved_assets.bible_db_sha256,
             "ref_audio_sha256": resolved_assets.ref_audio_sha256,
             "ref_text_sha256": resolved_assets.ref_text_sha256,
@@ -232,9 +261,9 @@ class GenerationService:
             "status": "completed",
             **metadata,
             "audio_path": str(audio_path),
-            "audio_url": self._api_url(f"/download/{book_slug}/{chapter}"),
+            "audio_url": self._download_url(book_slug, chapter, output_namespace),
             "metadata_path": str(metadata_path),
-            "metadata_url": self._api_url(f"/download/{book_slug}/{chapter}/metadata"),
+            "metadata_url": self._download_url(book_slug, chapter, output_namespace, metadata=True),
         }
 
     def _input_hash(
@@ -251,14 +280,18 @@ class GenerationService:
         include_chapter_intro: bool,
         chapter_intro_pause_seconds: float,
         bitrate: str,
+        tts_backend: str,
+        model_id: str,
+        omnivoice_options: dict[str, Any] | None,
     ) -> str:
         return stable_hash(
             {
                 "book_id": book_id,
                 "chapter": chapter,
                 "full_text": full_text,
-                "model_id": self.settings.model_id,
+                "model_id": model_id,
                 "tts_mode": self.settings.tts_mode,
+                "tts_backend": tts_backend,
                 "voice_id": voice_id,
                 "bible_db_sha256": resolved_assets.bible_db_sha256,
                 "ref_audio_sha256": resolved_assets.ref_audio_sha256,
@@ -269,6 +302,7 @@ class GenerationService:
                 "include_chapter_intro": include_chapter_intro,
                 "chapter_intro_pause_seconds": chapter_intro_pause_seconds,
                 "bitrate": bitrate,
+                "omnivoice_options": omnivoice_options,
             }
         )
 
@@ -276,6 +310,14 @@ class GenerationService:
         if self.settings.public_base_url:
             return f"{self.settings.public_base_url.rstrip('/')}{path}"
         return path
+
+    def _download_url(self, book_slug: str, chapter: int, output_namespace: str, *, metadata: bool = False) -> str:
+        path = f"/download/{book_slug}/{chapter}"
+        if metadata:
+            path = f"{path}/metadata"
+        if output_namespace != "default":
+            path = f"{path}?backend={output_namespace}"
+        return self._api_url(path)
 
 
 def chunk_units(units: list[str], max_chars: int) -> list[str]:
@@ -306,3 +348,12 @@ def split_intro_units(units: list[str], include_chapter_intro: bool) -> tuple[li
     if include_chapter_intro and units:
         return [units[0]], units[1:]
     return [], units
+
+
+def output_namespace_for_backend(backend: str | None) -> str:
+    if backend is None or backend == "default":
+        return "default"
+    normalized = normalize_backend(backend)
+    if normalized == "qwen3":
+        return "default"
+    return normalized

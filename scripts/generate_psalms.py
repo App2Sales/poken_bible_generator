@@ -25,6 +25,14 @@ def main() -> int:
     parser.add_argument("--end", type=int, default=150)
     parser.add_argument("--voice-id", default="narrador_principal")
     parser.add_argument("--language", default="Portuguese")
+    parser.add_argument("--tts-backend")
+    parser.add_argument("--model-id")
+    parser.add_argument("--omnivoice-num-step", type=int)
+    parser.add_argument("--omnivoice-guidance-scale", type=float)
+    parser.add_argument("--omnivoice-denoise", action="store_true")
+    parser.add_argument("--omnivoice-speed", type=float)
+    parser.add_argument("--omnivoice-duration", type=float)
+    parser.add_argument("--omnivoice-instruct")
     parser.add_argument("--bible-db-url")
     parser.add_argument("--ref-audio-url")
     parser.add_argument("--ref-text-url")
@@ -56,6 +64,24 @@ def main() -> int:
             "force": args.force,
             "upload": not args.no_upload,
         }
+        if args.tts_backend:
+            payload["tts_backend"] = args.tts_backend
+        if args.model_id:
+            payload["model_id"] = args.model_id
+        omnivoice = {
+            key: value
+            for key, value in {
+                "num_step": args.omnivoice_num_step,
+                "guidance_scale": args.omnivoice_guidance_scale,
+                "denoise": True if args.omnivoice_denoise else None,
+                "speed": args.omnivoice_speed,
+                "duration": args.omnivoice_duration,
+                "instruct": args.omnivoice_instruct,
+            }.items()
+            if value is not None
+        }
+        if omnivoice:
+            payload["omnivoice"] = omnivoice
         if assets:
             payload["assets"] = assets
         try:

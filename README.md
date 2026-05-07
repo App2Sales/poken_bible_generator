@@ -1,6 +1,6 @@
 # Spoken Bible Generator
 
-MVP para gerar capítulos bíblicos narrados com voice cloning usando `Qwen/Qwen3-TTS-12Hz-1.7B-Base`.
+MVP para gerar capítulos bíblicos narrados com voice cloning. O backend padrão é `Qwen/Qwen3-TTS-12Hz-1.7B-Base`; `OmniVoice` existe como opção experimental.
 
 ## Padrão de TTS
 
@@ -12,6 +12,7 @@ Variáveis recomendadas para produção:
 BIBLE_DB_PATH=/data/bible.sqlite
 OUTPUT_DIR=/outputs
 ASSET_CACHE_DIR=/data/assets
+TTS_BACKEND=qwen3
 MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Base
 TTS_MODE=voice_clone
 REF_AUDIO_PATH=/data/voices/narrador.wav
@@ -23,7 +24,7 @@ CHUNK_MAX_CHARS=400
 CHAPTER_INTRO_PAUSE_SECONDS=1.0
 ```
 
-No startup, a aplicação carrega o modelo uma vez. O `voice_clone_prompt` é criado uma vez por conjunto de assets, identificado por `voice_id`, SHA-256 do áudio de referência, SHA-256 da transcrição e `X_VECTOR_ONLY_MODE`.
+No startup, a aplicação carrega o modelo uma vez. O `voice_clone_prompt` é criado uma vez por conjunto de assets, identificado por backend, `voice_id`, SHA-256 do áudio de referência, SHA-256 da transcrição e `X_VECTOR_ONLY_MODE`.
 
 Quando os assets são enviados no request, a aplicação baixa os arquivos, salva em cache local em `ASSET_CACHE_DIR` e cria ou reutiliza o prompt correspondente. Quando os assets não são enviados, usa `BIBLE_DB_PATH`, `REF_AUDIO_PATH` e `REF_TEXT_PATH` como fallback.
 
@@ -38,6 +39,40 @@ model.create_voice_clone_prompt(
 ```
 
 Esse prompt é reutilizado em todos os chunks e capítulos que usam os mesmos assets. Ele não é recriado por chunk nem por capítulo.
+
+## OmniVoice Experimental
+
+Para testar OmniVoice, instale as dependências extras e inicie outro worker com o backend experimental:
+
+```bash
+pip install -r requirements-omnivoice.txt
+export TTS_BACKEND=omnivoice
+export MODEL_ID=k2-fsa/OmniVoice
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+O worker não troca de backend/modelo em runtime, porque o modelo é carregado uma vez no startup. Se você enviar `tts_backend` ou `model_id` no request, eles precisam bater com o backend/modelo já carregado; caso contrário a API rejeita a chamada e pede reinício com as variáveis corretas.
+
+Opções OmniVoice por request:
+
+```json
+{
+  "tts_backend": "omnivoice",
+  "model_id": "k2-fsa/OmniVoice",
+  "omnivoice": {
+    "num_step": 32,
+    "guidance_scale": 2.0,
+    "denoise": true,
+    "speed": 1.0,
+    "duration": null,
+    "preprocess_prompt": true,
+    "postprocess_output": true,
+    "instruct": ""
+  }
+}
+```
+
+Saídas Qwen continuam em `/outputs/default`. Saídas OmniVoice ficam em `/outputs/omnivoice` e os links de download retornam `?backend=omnivoice` para comparar sem sobrescrever arquivos.
 
 ## Áudio de Referência
 
@@ -62,6 +97,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   "book": "Salmos",
   "chapter": 23,
   "voice_id": "narrador_principal",
+  "tts_backend": "qwen3",
+  "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
   "language": "Portuguese",
   "format": "mp3",
   "bitrate": "192k",
@@ -71,6 +108,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
   "chapter_intro_pause_seconds": 1.0,
   "force": false,
   "upload": true,
+  "omnivoice": null,
   "assets": {
     "bible_db_url": "https://exemplo.com/bible.sqlite",
     "ref_audio_url": "https://exemplo.com/narrador.wav",
@@ -101,7 +139,9 @@ Resposta esperada:
   "ref_audio_sha256": "...",
   "ref_text_sha256": "...",
   "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
-  "tts_mode": "voice_clone"
+  "tts_mode": "voice_clone",
+  "tts_backend": "qwen3",
+  "omnivoice_options": null
 }
 ```
 
@@ -110,6 +150,8 @@ Resposta esperada:
 ```json
 {
   "voice_id": "narrador_principal",
+  "tts_backend": "qwen3",
+  "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
   "ref_audio_path_exists": true,
   "ref_text_path_exists": true,
   "ref_audio_sha256": "...",
@@ -129,6 +171,13 @@ Baixar metadata:
 
 ```bash
 curl -L "http://127.0.0.1:8000/download/salmos/23/metadata" -o salmos_023.json
+```
+
+Para baixar uma geração OmniVoice:
+
+```bash
+curl -L "http://127.0.0.1:8000/download/salmos/23?backend=omnivoice" -o salmos_023_omnivoice.mp3
+curl -L "http://127.0.0.1:8000/download/salmos/23/metadata?backend=omnivoice" -o salmos_023_omnivoice.json
 ```
 
 ## Assets por URL
@@ -158,9 +207,9 @@ Regras:
 
 ## Cache e Metadata
 
-O `input_hash` considera `book_id`, `chapter`, texto completo do capítulo, `model_id`, `tts_mode`, `voice_id`, SHA-256 do SQLite, SHA-256 do áudio de referência, SHA-256 da transcrição, idioma, flags de inclusão e `bitrate`.
+O `input_hash` considera `book_id`, `chapter`, texto completo do capítulo, `model_id`, `tts_mode`, `tts_backend`, `voice_id`, SHA-256 do SQLite, SHA-256 do áudio de referência, SHA-256 da transcrição, idioma, flags de inclusão, pausa do título, `bitrate` e opções OmniVoice normalizadas quando aplicável.
 
-O metadata JSON é salvo em `/outputs/default/<livro>/metadata/<livro>_<capitulo>.json` e inclui `bible_db_sha256`, `ref_audio_sha256`, `ref_text_sha256`, URLs dos assets, chunks, duração, SHA-256 do áudio e `input_hash`.
+O metadata JSON é salvo em `/outputs/<namespace>/<livro>/metadata/<livro>_<capitulo>.json` e inclui `bible_db_sha256`, `ref_audio_sha256`, `ref_text_sha256`, URLs dos assets, chunks, duração, SHA-256 do áudio e `input_hash`. O namespace padrão do Qwen é `default`; o namespace OmniVoice é `omnivoice`.
 
 ## Pausa Após Título
 
@@ -219,6 +268,7 @@ Configure variáveis de ambiente para o Pod:
 ```bash
 export OUTPUT_DIR=/workspace/outputs
 export ASSET_CACHE_DIR=/workspace/assets
+export TTS_BACKEND=qwen3
 export MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Base
 export TTS_MODE=voice_clone
 export VOICE_ID=narrador_principal
@@ -226,6 +276,14 @@ export DEFAULT_LANGUAGE=Portuguese
 export X_VECTOR_ONLY_MODE=false
 export CHUNK_MAX_CHARS=400
 export CHAPTER_INTRO_PAUSE_SECONDS=1.0
+```
+
+Para o worker OmniVoice experimental no Pod:
+
+```bash
+pip install -r requirements-omnivoice.txt
+export TTS_BACKEND=omnivoice
+export MODEL_ID=k2-fsa/OmniVoice
 ```
 
 Inicie a API:
@@ -258,6 +316,7 @@ Formato de chamada:
     "book": "Salmos",
     "chapter": 23,
     "voice_id": "narrador_principal",
+    "tts_backend": "qwen3",
     "language": "Portuguese",
     "include_headings": false,
     "include_verse_numbers": false,

@@ -38,6 +38,9 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
         upload=parse_bool(payload.get("upload", True)),
         assets=asset_request(payload.get("assets")),
         narration_style=payload.get("narration_style"),
+        tts_backend=payload.get("tts_backend"),
+        model_id=payload.get("model_id"),
+        omnivoice_options=payload.get("omnivoice") or payload.get("omnivoice_options"),
     )
 
 

@@ -5,6 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     BIBLE_DB_PATH=/data/bible.sqlite \
     OUTPUT_DIR=/outputs \
     ASSET_CACHE_DIR=/data/assets \
+    TTS_BACKEND=qwen3 \
     MODEL_ID=Qwen/Qwen3-TTS-12Hz-1.7B-Base \
     TTS_MODE=voice_clone \
     REF_AUDIO_PATH=/data/voices/narrador.wav \
