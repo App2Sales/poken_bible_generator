@@ -43,6 +43,8 @@ def handler(event: dict[str, Any]) -> dict[str, Any]:
         model_id=payload.get("model_id"),
         omnivoice_options=payload.get("omnivoice") or payload.get("omnivoice_options"),
         generation_unit=payload.get("generation_unit"),
+        extract_verse_timings=parse_optional_bool(payload.get("extract_verse_timings")),
+        whisper_model=payload.get("whisper_model"),
     )
 
 
@@ -67,6 +69,12 @@ def parse_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
     return bool(value)
+
+
+def parse_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    return parse_bool(value)
 
 
 def parse_optional_float(value: Any) -> float | None:

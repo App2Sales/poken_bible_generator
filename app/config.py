@@ -43,6 +43,9 @@ class Settings:
     generation_unit: str = os.getenv("GENERATION_UNIT", "chapter")
     chapter_intro_pause_seconds: float = float(os.getenv("CHAPTER_INTRO_PAUSE_SECONDS", "0.5"))
     pericope_pause_seconds: float = float(os.getenv("PERICOPE_PAUSE_SECONDS", "0.3"))
+    extract_verse_timings: bool = env_bool("EXTRACT_VERSE_TIMINGS", True)
+    whisper_model: str = os.getenv("WHISPER_MODEL", "medium")
+    whisper_device: str | None = os.getenv("WHISPER_DEVICE")
     public_base_url: str | None = os.getenv("PUBLIC_BASE_URL")
 
 

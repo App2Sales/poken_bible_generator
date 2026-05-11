@@ -24,12 +24,19 @@ class PericopeContent:
 
 
 @dataclass(frozen=True)
+class VerseContent:
+    verse: int
+    text: str
+
+
+@dataclass(frozen=True)
 class ChapterContent:
     book_id: int
     book: str
     chapter: int
     text: str
     units: list[str]
+    verses: list[VerseContent]
     pericopes: list[PericopeContent]
     heading_count: int
 
@@ -126,6 +133,7 @@ class BibleRepository:
             if row["verse"] is not None and str(row["title"] or "").strip()
         }
         pericopes: list[PericopeContent] = []
+        verses: list[VerseContent] = []
         current_pericope: list[str] = []
         current_title: str | None = None
         current_start_verse: int | None = None
@@ -164,6 +172,9 @@ class BibleRepository:
             if not text:
                 continue
 
+            if verse > 0:
+                verses.append(VerseContent(verse=verse, text=text))
+
             if include_verse_numbers and verse > 0:
                 text = f"Versículo {verse}. {text}"
             units.append(text)
@@ -182,6 +193,7 @@ class BibleRepository:
             chapter=chapter,
             text="\n".join(units),
             units=units,
+            verses=verses,
             pericopes=pericopes,
             heading_count=heading_count,
         )

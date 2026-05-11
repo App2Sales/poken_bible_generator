@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -60,6 +60,8 @@ class GenerateRequest(BaseModel):
     model_id: str | None = None
     omnivoice: OmniVoiceOptions | None = None
     generation_unit: str | None = None
+    extract_verse_timings: bool | None = None
+    whisper_model: str | None = None
 
     class Config:
         extra = "ignore"
@@ -130,6 +132,80 @@ def download_metadata(book: str, chapter: int, backend: str | None = None) -> Fi
     )
 
 
+@app.get("/download/{book}/{chapter}/timings")
+def download_timings(
+    book: str,
+    chapter: int,
+    backend: str | None = None,
+    format: str = Query(default="json"),
+) -> FileResponse:
+    book_slug = slugify(book)
+    try:
+        output_namespace = output_namespace_for_backend(backend)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    normalized_format = format.strip().lower()
+    suffix_by_format = {
+        "json": ".json",
+        "whisper-json": ".whisper.json",
+        "srt": ".srt",
+        "vtt": ".vtt",
+    }
+    media_type_by_format = {
+        "json": "application/json",
+        "whisper-json": "application/json",
+        "srt": "application/x-subrip",
+        "vtt": "text/vtt",
+    }
+    if normalized_format not in suffix_by_format:
+        raise HTTPException(status_code=400, detail="format deve ser json, whisper-json, srt ou vtt")
+    timings_path = (
+        Path(settings.output_dir)
+        / output_namespace
+        / book_slug
+        / "timings"
+        / f"{book_slug}_{chapter:03d}{suffix_by_format[normalized_format]}"
+    )
+    if not timings_path.exists():
+        raise HTTPException(status_code=404, detail="Timings não encontrados")
+
+    return FileResponse(
+        timings_path,
+        media_type=media_type_by_format[normalized_format],
+        filename=timings_path.name,
+    )
+
+
+class TimingRequest(BaseModel):
+    language: str | None = None
+    tts_backend: str | None = None
+    whisper_model: str | None = None
+    force: bool = False
+    assets: AssetsRequest | None = None
+
+    class Config:
+        extra = "ignore"
+
+
+@app.post("/timings/{book}/{chapter}")
+def generate_timings(book: str, chapter: int, request: TimingRequest | None = None) -> dict[str, Any]:
+    request = request or TimingRequest()
+    try:
+        return service.generate_verse_timings(
+            book=book,
+            chapter=chapter,
+            language=request.language,
+            tts_backend=request.tts_backend,
+            whisper_model=request.whisper_model,
+            assets=to_asset_request(request.assets),
+            force=request.force,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/generate")
 def generate(request: GenerateRequest) -> dict[str, Any]:
     try:
@@ -153,6 +229,8 @@ def generate(request: GenerateRequest) -> dict[str, Any]:
             model_id=request.model_id,
             omnivoice_options=to_omnivoice_options(request.omnivoice),
             generation_unit=request.generation_unit,
+            extract_verse_timings=request.extract_verse_timings,
+            whisper_model=request.whisper_model,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

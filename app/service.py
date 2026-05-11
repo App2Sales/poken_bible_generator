@@ -9,6 +9,7 @@ from app.audio import probe_duration_seconds, silence, write_audio_file
 from app.assets import AssetManager, AssetRequest, ResolvedAssets
 from app.bible import BibleRepository, PericopeContent
 from app.config import Settings
+from app.timings import extract_verse_timings as extract_verse_timings_file
 from app.tts_engine import TTSEngine, normalize_backend, normalize_omnivoice_options
 from app.utils import file_sha256, slugify, stable_hash
 
@@ -77,6 +78,8 @@ class GenerationService:
         model_id: str | None = None,
         omnivoice_options: dict[str, Any] | None = None,
         generation_unit: str | None = None,
+        extract_verse_timings: bool | None = None,
+        whisper_model: str | None = None,
     ) -> dict[str, Any]:
         if audio_format != "mp3":
             raise ValueError("Apenas format=mp3 é suportado no MVP")
@@ -96,6 +99,12 @@ class GenerationService:
 
         normalized_omnivoice_options = normalize_omnivoice_options(omnivoice_options)
         requested_generation_unit = normalize_generation_unit(generation_unit or self.settings.generation_unit)
+        should_extract_verse_timings = (
+            extract_verse_timings
+            if extract_verse_timings is not None
+            else self.settings.extract_verse_timings
+        )
+        selected_whisper_model = whisper_model or self.settings.whisper_model
 
         pause_seconds = (
             chapter_intro_pause_seconds
@@ -173,6 +182,17 @@ class GenerationService:
                 metadata["audio_url"] = self._download_url(book_slug, chapter, output_namespace)
                 metadata["metadata_path"] = str(metadata_path)
                 metadata["metadata_url"] = self._download_url(book_slug, chapter, output_namespace, metadata=True)
+                if should_extract_verse_timings and not self._timing_paths(output_root, chapter_name)["json"].exists():
+                    metadata["verse_timings"] = self._extract_verse_timings(
+                        audio_path=audio_path,
+                        output_root=output_root,
+                        chapter_name=chapter_name,
+                        content=content,
+                        language=selected_language,
+                        whisper_model=selected_whisper_model,
+                        output_namespace=output_namespace,
+                    )
+                    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
                 return metadata
 
         voice_clone_prompt = self.tts.get_voice_clone_prompt(
@@ -300,12 +320,24 @@ class GenerationService:
             "include_chapter_intro": include_chapter_intro,
             "chapter_intro_pause_seconds": pause_seconds,
             "pericope_pause_seconds": selected_pericope_pause_seconds,
+            "extract_verse_timings": should_extract_verse_timings,
+            "whisper_model": selected_whisper_model,
             "chunks": chunk_metadata,
             "generation_units": generation_unit_metadata,
             "duration_seconds": duration_seconds,
             "sha256": audio_sha256,
             "input_hash": input_hash,
         }
+        if should_extract_verse_timings:
+            metadata["verse_timings"] = self._extract_verse_timings(
+                audio_path=audio_path,
+                output_root=output_root,
+                chapter_name=chapter_name,
+                content=content,
+                language=selected_language,
+                whisper_model=selected_whisper_model,
+                output_namespace=output_namespace,
+            )
         metadata_path.parent.mkdir(parents=True, exist_ok=True)
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -317,6 +349,63 @@ class GenerationService:
             "metadata_path": str(metadata_path),
             "metadata_url": self._download_url(book_slug, chapter, output_namespace, metadata=True),
         }
+
+    def generate_verse_timings(
+        self,
+        *,
+        book: str,
+        chapter: int,
+        language: str | None = None,
+        tts_backend: str | None = None,
+        whisper_model: str | None = None,
+        assets: AssetRequest | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        selected_backend = normalize_backend(tts_backend or self.settings.tts_backend)
+        selected_language = language or self.settings.default_language
+        selected_whisper_model = whisper_model or self.settings.whisper_model
+        resolved_assets = self.assets.resolve(
+            assets,
+            x_vector_only_mode=self.settings.x_vector_only_mode,
+            force_download=False,
+        )
+        bible = BibleRepository(resolved_assets.bible_db_path)
+        bible.validate()
+        content = bible.get_chapter(
+            book,
+            chapter,
+            include_headings=False,
+            include_verse_numbers=False,
+            include_chapter_intro=False,
+        )
+        book_slug = slugify(content.book)
+        chapter_name = f"{book_slug}_{chapter:03d}"
+        output_namespace = output_namespace_for_backend(selected_backend)
+        output_root = Path(self.settings.output_dir) / output_namespace / book_slug
+        audio_path = output_root / f"{chapter_name}.mp3"
+        if not audio_path.exists():
+            raise FileNotFoundError(f"Áudio não encontrado: {audio_path}")
+
+        paths = self._timing_paths(output_root, chapter_name)
+        if not force and paths["json"].exists():
+            payload = json.loads(paths["json"].read_text(encoding="utf-8"))
+            return {
+                "status": "completed",
+                **payload,
+                **self._timing_urls(book_slug, chapter, output_namespace),
+            }
+
+        result = self._extract_verse_timings(
+            audio_path=audio_path,
+            output_root=output_root,
+            chapter_name=chapter_name,
+            content=content,
+            language=selected_language,
+            whisper_model=selected_whisper_model,
+            output_namespace=output_namespace,
+            fail_on_error=True,
+        )
+        return {"status": "completed", **result}
 
     def _input_hash(
         self,
@@ -374,6 +463,69 @@ class GenerationService:
         if output_namespace != "default":
             path = f"{path}?backend={output_namespace}"
         return self._api_url(path)
+
+    def _timing_paths(self, output_root: Path, chapter_name: str) -> dict[str, Path]:
+        root = output_root / "timings"
+        return {
+            "json": root / f"{chapter_name}.json",
+            "whisper-json": root / f"{chapter_name}.whisper.json",
+            "srt": root / f"{chapter_name}.srt",
+            "vtt": root / f"{chapter_name}.vtt",
+        }
+
+    def _timing_urls(self, book_slug: str, chapter: int, output_namespace: str) -> dict[str, str]:
+        return {
+            "timings_url": self._timings_url(book_slug, chapter, output_namespace, "json"),
+            "whisper_timings_url": self._timings_url(book_slug, chapter, output_namespace, "whisper-json"),
+            "srt_url": self._timings_url(book_slug, chapter, output_namespace, "srt"),
+            "vtt_url": self._timings_url(book_slug, chapter, output_namespace, "vtt"),
+        }
+
+    def _timings_url(self, book_slug: str, chapter: int, output_namespace: str, fmt: str) -> str:
+        path = f"/download/{book_slug}/{chapter}/timings?format={fmt}"
+        if output_namespace != "default":
+            path = f"{path}&backend={output_namespace}"
+        return self._api_url(path)
+
+    def _extract_verse_timings(
+        self,
+        *,
+        audio_path: Path,
+        output_root: Path,
+        chapter_name: str,
+        content: Any,
+        language: str,
+        whisper_model: str,
+        output_namespace: str,
+        fail_on_error: bool = False,
+    ) -> dict[str, Any]:
+        try:
+            result = extract_verse_timings_file(
+                audio_path=audio_path,
+                verses=content.verses,
+                output_dir=output_root / "timings",
+                book=content.book,
+                chapter=content.chapter,
+                language=language,
+                whisper_model=whisper_model,
+                whisper_device=self.settings.whisper_device,
+            )
+            book_slug = slugify(content.book)
+            return {
+                "status": "completed",
+                "chapter_name": chapter_name,
+                "path": result["timings_path"],
+                "whisper_path": result["whisper_timings_path"],
+                "srt_path": result["srt_path"],
+                "vtt_path": result["vtt_path"],
+                **self._timing_urls(book_slug, content.chapter, output_namespace),
+                "alignment": result.get("alignment"),
+            }
+        except Exception as exc:
+            if fail_on_error:
+                raise
+            logger.exception("Falha ao extrair timings de versículo")
+            return {"status": "failed", "error": repr(exc), "whisper_model": whisper_model}
 
 
 def split_intro_units(units: list[str], include_chapter_intro: bool) -> tuple[list[str], list[str]]:

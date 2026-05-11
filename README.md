@@ -97,6 +97,8 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 `pericope_pause_seconds` é opcional por request. Se omitido, usa `PERICOPE_PAUSE_SECONDS`, com default `0.3`. A pausa é inserida apenas entre perícopes quando o modo efetivo é `pericope` e o capítulo tem mais de uma perícope.
 
+`extract_verse_timings` controla a extração de timings por versículo com Whisper. Se omitido, usa `EXTRACT_VERSE_TIMINGS`, com default `true`. O idioma do Whisper é derivado do campo `language` da request; não há detecção automática de idioma. `whisper_model` é opcional e usa `WHISPER_MODEL`, com default `medium`.
+
 Resposta inclui `requested_generation_unit`, `generation_unit`, `generation_units`, `tts_backend`, `omnivoice_options`, hashes dos assets, chunks de áudio, pausas, duração, SHA-256 do MP3 e `input_hash`.
 
 Quando `generation_unit=pericope`, cada item de `generation_units` registra `title`, `start_verse`, `end_verse`, `text_chars` e `sample_rate`.
@@ -116,6 +118,31 @@ Baixar metadata:
 ```bash
 curl -L "http://127.0.0.1:8000/download/salmos/23/metadata?backend=omnivoice" -o salmos_023.json
 ```
+
+Baixar timings por versículo:
+
+```bash
+curl -L "http://127.0.0.1:8000/download/salmos/23/timings?backend=omnivoice&format=json" -o salmos_023.timings.json
+curl -L "http://127.0.0.1:8000/download/salmos/23/timings?backend=omnivoice&format=whisper-json" -o salmos_023.whisper.json
+curl -L "http://127.0.0.1:8000/download/salmos/23/timings?backend=omnivoice&format=srt" -o salmos_023.srt
+curl -L "http://127.0.0.1:8000/download/salmos/23/timings?backend=omnivoice&format=vtt" -o salmos_023.vtt
+```
+
+Gerar timings para áudio já existente, sem regenerar TTS:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/timings/salmos/23" \
+  -H "Content-Type: application/json" \
+  -d '{"language":"Portuguese","whisper_model":"medium"}'
+```
+
+Batch para áudios existentes:
+
+```bash
+python scripts/generate_verse_timings.py --api-base-url http://127.0.0.1:8000 --bible-db bibles/naa.db
+```
+
+O JSON canônico usa o texto da NAA como fonte de verdade e usa o Whisper apenas como fonte de timestamps. O alinhamento é fuzzy/global por capítulo, ignora a introdução do capítulo e registra `confidence`, `matched_words`, `total_words` e `method` para cada versículo.
 
 ## Assets por Request
 
@@ -156,7 +183,7 @@ Regras:
 
 O `input_hash` considera `book_id`, `chapter`, texto completo do capítulo, `model_id`, `tts_mode`, `tts_backend`, `voice_id`, SHA-256 do SQLite, SHA-256 do áudio de referência, SHA-256 da transcrição, idioma, flags de inclusão, pausa do título, pausa entre perícopes, `bitrate`, `requested_generation_unit` e opções OmniVoice normalizadas.
 
-O metadata JSON é salvo em `/outputs/omnivoice/<livro>/metadata/<livro>_<capitulo>.json`. Áudios são salvos em `/outputs/omnivoice/<livro>/<livro>_<capitulo>.mp3`.
+O metadata JSON é salvo em `/outputs/omnivoice/<livro>/metadata/<livro>_<capitulo>.json`. Áudios são salvos em `/outputs/omnivoice/<livro>/<livro>_<capitulo>.mp3`. Timings são salvos em `/outputs/omnivoice/<livro>/timings/<livro>_<capitulo>.*`.
 
 ## Enriquecer Perícopes
 
